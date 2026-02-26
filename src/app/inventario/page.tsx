@@ -1,16 +1,18 @@
 "use client";
 
 import { useState, useEffect, useRef } from 'react';
+import { getOwnerId } from '@/src/lib/userId';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/src/components/Dialog';
-import { Package, Search, Plus, Trash2, Edit2, DollarSign, ShoppingCart, Tag, X, ScanLine } from 'lucide-react';
+import { Package, Search, Plus, Trash2, Edit2, DollarSign, ShoppingCart, Tag, X, ScanLine, Image as ImageIcon } from 'lucide-react';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { collection, addDoc, updateDoc, deleteDoc, doc, query, where, onSnapshot, getDocs, getDoc } from 'firebase/firestore';
-
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { storage } from '@/src/lib/firebase';
 import { auth, db } from '@/src/lib/firebase';
 import { toast } from 'sonner';
 import { BrowserMultiFormatReader } from '@zxing/library';
@@ -25,6 +27,7 @@ interface Product {
   barcode: string;
   cost_price: number;
   userId: string;
+  image?: string;
   variants?: Record<string, string>;
 }
 
@@ -125,6 +128,7 @@ export default function InventarioPage() {
   const [category, setCategory] = useState('');
   const [barcode, setBarcode] = useState('');
   const [costPrice, setCostPrice] = useState('');
+  const [productImage, setProductImage] = useState('');
 
   useEffect(() => {
   if (user) {
@@ -136,7 +140,9 @@ export default function InventarioPage() {
 
   const loadProducts = async () => {
     try {
-      const q = query(collection(db, 'products'), where('userId', '==', user?.uid));
+      const ownerId = getOwnerId() || user?.uid;
+      if (!ownerId) return;
+      const q = query(collection(db, 'products'), where('userId', '==', ownerId));
       const unsubscribe = onSnapshot(q, (snapshot) => {
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
         setProducts(data);
@@ -147,7 +153,9 @@ export default function InventarioPage() {
 
   const loadCategories = async () => {
     try {
-      const q = query(collection(db, 'categories'), where('userId', '==', user?.uid));
+      const ownerId = getOwnerId() || user?.uid;
+      if (!ownerId) return;
+      const q = query(collection(db, 'categories'), where('userId', '==', ownerId));
       const snapshot = await getDocs(q);
       const cats = snapshot.docs.map(doc => doc.data().name);
       setCategories(['Todos', ...cats]);
@@ -157,7 +165,9 @@ export default function InventarioPage() {
   const loadVariants = async () => {
   if (!user) return;
   try {
-    const docRef = doc(db, 'settings', user.uid);
+    const ownerId = getOwnerId() || user?.uid;
+    if (!ownerId) return;
+    const docRef = doc(db, 'settings', ownerId);
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) {
       const data = docSnap.data();
@@ -191,6 +201,7 @@ export default function InventarioPage() {
     setCategory('');
     setBarcode('');
     setCostPrice('');
+    setProductImage('');
     setEditingProduct(null);
     setSelectedVariantOptions({});
   };
@@ -208,6 +219,7 @@ export default function InventarioPage() {
   setCategory(product.category);
   setBarcode(product.barcode || '');
   setCostPrice(product.cost_price?.toString() || '');
+  setProductImage(product.image || '');
   setSelectedVariantOptions(product.variants || {});
   setIsDialogOpen(true);
 };
@@ -219,43 +231,67 @@ export default function InventarioPage() {
   };
 
   const handleSave = async () => {
-    if (!user || !name || !price || !stock || !category) {
-      toast.error('Completa todos los campos');
-      return;
-    }
-    try {
-      const productData: any = {
-        name,
-        price: parseFloat(price),
-        stock: parseInt(stock),
-        category,
-        barcode: barcode || '',
-        cost_price: parseFloat(costPrice) || 0,
-        userId: user.uid
-      };
-
-      const variantsData: Record<string, string> = {};
-      Object.entries(selectedVariantOptions).forEach(([key, value]) => {
-        if (value) variantsData[key] = value;
-      });
-      if (Object.keys(variantsData).length > 0) {
-        productData.variants = variantsData;
+  const ownerId = getOwnerId() || user?.uid;
+  if (!ownerId || !name || !price || !stock || !category) {
+    toast.error('Completa todos los campos');
+    return;
+  }
+  
+  try {
+    let imageUrl = '';
+    
+    // Si hay una imagen nueva (base64), subirla a Storage
+    if (productImage && productImage.startsWith('data:')) {
+      try {
+        const response = await fetch(productImage);
+        const blob = await response.blob();
+        const fileName = `products/${ownerId}/${Date.now()}.jpg`;
+        const storageRef = ref(storage, fileName);
+        await uploadBytes(storageRef, blob);
+        imageUrl = await getDownloadURL(storageRef);
+      } catch (uploadError) {
+        console.error('Error uploading image:', uploadError);
+        toast.error('Error al subir imagen');
+        return;
       }
-
-      if (editingProduct) {
-        await updateDoc(doc(db, 'products', editingProduct.id), productData);
-        toast.success('Producto actualizado');
-      } else {
-        await addDoc(collection(db, 'products'), productData);
-        toast.success('Producto agregado');
-      }
-      setIsDialogOpen(false);
-      resetForm();
-    } catch (error) {
-      console.error('Error:', error);
-      toast.error('Error al guardar');
+    } else {
+      // Si es una URL existente, usarla
+      imageUrl = productImage;
     }
-  };
+
+    const productData: any = {
+      name,
+      price: parseFloat(price),
+      stock: parseInt(stock),
+      category,
+      barcode: barcode || '',
+      cost_price: parseFloat(costPrice) || 0,
+      userId: ownerId,
+      image: imageUrl
+    };
+
+    const variantsData: Record<string, string> = {};
+    Object.entries(selectedVariantOptions).forEach(([key, value]) => {
+      if (value) variantsData[key] = value;
+    });
+    if (Object.keys(variantsData).length > 0) {
+      productData.variants = variantsData;
+    }
+
+    if (editingProduct) {
+      await updateDoc(doc(db, 'products', editingProduct.id), productData);
+      toast.success('Producto actualizado');
+    } else {
+      await addDoc(collection(db, 'products'), productData);
+      toast.success('Producto agregado');
+    }
+    setIsDialogOpen(false);
+    resetForm();
+  } catch (error) {
+    console.error('Error:', error);
+    toast.error('Error al guardar');
+  }
+};
 
   const handleDelete = async (id: string) => {
     if (!confirm('¿Eliminar?')) return;
@@ -269,10 +305,11 @@ export default function InventarioPage() {
   };
 
   const handleAddCategory = async () => {
-    if (!user) {
-      toast.error('Inicia sesión');
-      return;
-    }
+  const ownerId = getOwnerId() || user?.uid;
+  if (!ownerId) {
+    toast.error('Inicia sesión');
+    return;
+  }
     if (!newCategory.trim()) {
       toast.error('Escribe nombre');
       return;
@@ -282,7 +319,7 @@ export default function InventarioPage() {
       return;
     }
     try {
-      await addDoc(collection(db, 'categories'), { name: newCategory.trim(), userId: user.uid });
+      await addDoc(collection(db, 'categories'), { name: newCategory.trim(), userId: ownerId });
       setCategories(prev => [...prev, newCategory.trim()]);
       setCategory(newCategory.trim());
       setNewCategory('');
@@ -295,9 +332,11 @@ export default function InventarioPage() {
   };
 
   const handleDeleteCategory = async (cat: string) => {
-    if (!confirm(`¿Eliminar "${cat}"?`)) return;
-    try {
-      const q = query(collection(db, 'categories'), where('userId', '==', user?.uid), where('name', '==', cat));
+  if (!confirm(`¿Eliminar "${cat}"?`)) return;
+  try {
+    const ownerId = getOwnerId() || user?.uid;
+    if (!ownerId) return;
+    const q = query(collection(db, 'categories'), where('userId', '==', ownerId), where('name', '==', cat));
       const snapshot = await getDocs(q);
       for (const docSnap of snapshot.docs) {
         await deleteDoc(doc(db, 'categories', docSnap.id));
@@ -424,12 +463,13 @@ export default function InventarioPage() {
   <table className="w-full text-sm">
     <thead className="border-b bg-muted/50">
       <tr>
+        <th className="text-left p-2 font-semibold text-xs">Imagen</th>
         <th className="text-left p-2 font-semibold text-xs">Producto</th>
         {activeVariants.map((v) => (
           <th key={v.id} className="text-left p-2 font-semibold text-xs">{v.name}</th>
         ))}
         <th className="text-right p-2 font-semibold text-xs">Precio</th>
-        <th className="text-right p-2 font-semibold text-xs">Costo</th>
+                <th className="text-right p-2 font-semibold text-xs">Costo</th>
         <th className="text-left p-2 font-semibold text-xs">Categoría</th>
         <th className="text-left p-2 font-semibold text-xs">Código</th>
         <th className="text-center p-2 font-semibold text-xs">Stock</th>
@@ -439,6 +479,13 @@ export default function InventarioPage() {
     <tbody>
       {filteredProducts.map((product) => (
         <tr key={product.id} className={`border-b hover:bg-muted/30 ${product.stock < 10 ? 'bg-red-50' : ''}`}>
+          <td className="p-2">
+            {product.image ? (
+              <img src={product.image} alt={product.name} className="w-10 h-10 object-cover rounded" />
+            ) : (
+              <Package className="h-6 w-6 text-muted-foreground/30" />
+            )}
+          </td>
           <td className="p-2">
             <span className="font-medium text-xs">{product.name}</span>
           </td>
@@ -477,130 +524,155 @@ export default function InventarioPage() {
     </div>
   )}
 </div>
-                    {/* Product Dialog */}
-  <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-    <DialogContent className="max-w-md">
-      <DialogHeader>
-        <DialogTitle>{editingProduct ? 'Editar' : 'Nuevo'} Producto</DialogTitle>
-      </DialogHeader>
-      <div className="space-y-4">
-        <div>
-          <Label>Nombre *</Label>
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nombre" />
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <Label>Precio *</Label>
-            <Input type="number" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0.00" />
-          </div>
-          <div>
-            <Label>Stock *</Label>
-            <Input type="number" value={stock} onChange={(e) => setStock(e.target.value)} placeholder="0" />
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <Label>Categoría *</Label>
-            <Input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Categoría" list="cats" />
-            <datalist id="cats">
-              {categories.filter(c => c !== 'Todos').map(c => <option key={c} value={c} />)}
-            </datalist>
-          </div>
-          <div>
-            <Label>Costo</Label>
-            <Input type="number" value={costPrice} onChange={(e) => setCostPrice(e.target.value)} placeholder="0.00" />
-          </div>
-        </div>
-        <div>
-          <Label>Código de Barras</Label>
-          <div className="flex gap-2">
-            <Input 
-              value={barcode} 
-              onChange={(e) => setBarcode(e.target.value)} 
-              placeholder="Código de barras" 
-            />
-            <Button variant="outline" type="button" onClick={() => setScannerOpen(true)}>
-              <ScanLine className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-        {variants.length > 0 && (
-          <div className="border-t pt-4 mt-4">
-            <Label className="mb-2 block">Variantes</Label>
-            <div className="space-y-3">
-              {variants.map((variant) => (
-                <div key={variant.id}>
-                  <Label className="text-xs text-muted-foreground">{variant.name}</Label>
-                  <div className="flex flex-wrap gap-2 mt-1">
-                    {variant.options.map((option) => (
-                      <Button
-                        key={option.id}
-                        type="button"
-                        variant={selectedVariantOptions[variant.id] === option.name ? 'default' : 'outline'}
-                        size="sm"
-                        onClick={() => {
-                          setSelectedVariantOptions(prev => ({
-                            ...prev,
-                            [variant.id]: prev[variant.id] === option.name ? '' : option.name
-                          }));
-                        }}
-                      >
-                        {option.name}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-      <DialogFooter>
-        <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancelar</Button>
-        <Button onClick={handleSave}>Guardar</Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
 
-  {/* Categories Dialog */}
-  <Dialog open={isCategoryDialogOpen} onOpenChange={setIsCategoryDialogOpen}>
-    <DialogContent>
-      <DialogHeader>
-        <DialogTitle>Categorías</DialogTitle>
-      </DialogHeader>
-      <div className="space-y-4">
-        <div className="flex gap-2">
-          <Input
-            value={newCategory}
-            onChange={(e) => setNewCategory(e.target.value)}
-            placeholder="Nueva categoría"
-            onKeyDown={(e) => e.key === 'Enter' && handleAddCategory()}
+{/* Product Dialog */}
+<Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+  <DialogContent className="max-w-md">
+    <DialogHeader>
+      <DialogTitle>{editingProduct ? 'Editar' : 'Nuevo'} Producto</DialogTitle>
+    </DialogHeader>
+    <div className="space-y-4">
+      {/* Imagen */}
+      <div>
+        <Label>Imagen del producto</Label>
+        <div className="flex gap-2 items-center">
+          <Input 
+            type="file"
+            accept="image/*"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                  setProductImage(reader.result as string); // Vista previa
+                };
+                reader.readAsDataURL(file);
+              }
+            }} 
           />
-          <Button onClick={handleAddCategory}>
-            <Plus className="h-4 w-4" />
+          {productImage && (
+            <img src={productImage} alt="Preview" className="w-10 h-10 object-cover rounded border" />
+          )}
+        </div>
+      </div>
+      
+      <div>
+        <Label>Nombre *</Label>
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nombre" />
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <Label>Precio *</Label>
+          <Input type="number" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0.00" />
+        </div>
+        <div>
+          <Label>Stock *</Label>
+          <Input type="number" value={stock} onChange={(e) => setStock(e.target.value)} placeholder="0" />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <Label>Categoría *</Label>
+          <Input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Categoría" list="cats" />
+          <datalist id="cats">
+            {categories.filter(c => c !== 'Todos').map(c => <option key={c} value={c} />)}
+          </datalist>
+        </div>
+        <div>
+          <Label>Costo</Label>
+          <Input type="number" value={costPrice} onChange={(e) => setCostPrice(e.target.value)} placeholder="0.00" />
+        </div>
+      </div>
+      <div>
+        <Label>Código de Barras</Label>
+        <div className="flex gap-2">
+          <Input 
+            value={barcode} 
+            onChange={(e) => setBarcode(e.target.value)} 
+            placeholder="Código de barras" 
+          />
+          <Button variant="outline" type="button" onClick={() => setScannerOpen(true)}>
+            <ScanLine className="h-4 w-4" />
           </Button>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {categories.filter(c => c !== 'Todos').map((cat) => (
-            <Badge key={cat} variant="outline" className="flex items-center gap-1 px-3 py-1">
-              {cat}
-              <button onClick={() => handleDeleteCategory(cat)}>
-                <X className="h-3 w-3" />
-              </button>
-            </Badge>
-          ))}
-        </div>
       </div>
-    </DialogContent>
-  </Dialog>
+      {variants.length > 0 && (
+        <div className="border-t pt-4 mt-4">
+          <Label className="mb-2 block">Variantes</Label>
+          <div className="space-y-3">
+            {variants.map((variant) => (
+              <div key={variant.id}>
+                <Label className="text-xs text-muted-foreground">{variant.name}</Label>
+                <div className="flex flex-wrap gap-2 mt-1">
+                  {variant.options.map((option) => (
+                    <Button
+                      key={option.id}
+                      type="button"
+                      variant={selectedVariantOptions[variant.id] === option.name ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => {
+                        setSelectedVariantOptions(prev => ({
+                          ...prev,
+                          [variant.id]: prev[variant.id] === option.name ? '' : option.name
+                        }));
+                      }}
+                    >
+                      {option.name}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+    <DialogFooter>
+      <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancelar</Button>
+      <Button onClick={handleSave}>Guardar</Button>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
 
-  {/* Scanner Dialog */}
-  {scannerOpen && (
-    <ScannerDialog 
-      onScan={handleScan} 
-      onClose={() => setScannerOpen(false)} 
-    />
-  )}
+{/* Categories Dialog */}
+<Dialog open={isCategoryDialogOpen} onOpenChange={setIsCategoryDialogOpen}>
+  <DialogContent>
+    <DialogHeader>
+            <DialogTitle>Categorías</DialogTitle>
+    </DialogHeader>
+    <div className="space-y-4">
+      <div className="flex gap-2">
+        <Input
+          value={newCategory}
+          onChange={(e) => setNewCategory(e.target.value)}
+          placeholder="Nueva categoría"
+          onKeyDown={(e) => e.key === 'Enter' && handleAddCategory()}
+        />
+        <Button onClick={handleAddCategory}>
+          <Plus className="h-4 w-4" />
+        </Button>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {categories.filter(c => c !== 'Todos').map((cat) => (
+          <Badge key={cat} variant="outline" className="flex items-center gap-1 px-3 py-1">
+            {cat}
+            <button onClick={() => handleDeleteCategory(cat)}>
+              <X className="h-3 w-3" />
+            </button>
+          </Badge>
+        ))}
+      </div>
+    </div>
+  </DialogContent>
+</Dialog>
+
+{/* Scanner Dialog */}
+{scannerOpen && (
+  <ScannerDialog 
+    onScan={handleScan} 
+    onClose={() => setScannerOpen(false)} 
+  />
+)}
 </div>
-  );
+);
 }

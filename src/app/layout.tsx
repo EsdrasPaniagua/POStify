@@ -1,15 +1,14 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
-import { Toaster } from "sonner";
+import { ThemeProvider } from "@/src/components/ThemeProvider";
 import { Sidebar } from "@/src/components/Sidebar";
-import { AdsBanner } from "@/src/components/AdsBanner";
 
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "POStify - Punto de Venta",
-  description: "Sistema de ventas POS",
+  title: "POStify",
+  description: "Sistema de punto de venta",
 };
 
 export default function RootLayout({
@@ -18,18 +17,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="es">
-      <body className={inter.className} suppressHydrationWarning>
-        <div className="flex min-h-screen">
-          <Sidebar />
-          <main className="flex-1 min-h-screen bg-background overflow-x-hidden flex flex-col">
-            <div className="max-w-full flex-1">
+    <html lang="es" suppressHydrationWarning>
+      <body className={inter.className}>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+          <div className="flex min-h-screen">
+            <Sidebar />
+            <main className="flex-1 overflow-auto">
               {children}
-            </div>
-            <AdsBanner />
-          </main>
-        </div>
-        <Toaster position="top-right" richColors />
+            </main>
+          </div>
+        </ThemeProvider>
       </body>
     </html>
   );

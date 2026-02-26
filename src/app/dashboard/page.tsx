@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
+import { getOwnerId } from '@/src/lib/userId';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { DollarSign, ShoppingCart, Package, Calendar } from 'lucide-react';
@@ -41,14 +42,17 @@ export default function DashboardPage() {
   const [monthlyData, setMonthlyData] = useState<any[]>([]);
 
   useEffect(() => {
-    if (user) {
+    if (user || getOwnerId()) {
       loadStats();
     }
   }, [user]);
 
   const loadStats = async () => {
     try {
-      const q = query(collection(db, 'sales'), where('userId', '==', user?.uid));
+      const ownerId = getOwnerId() || user?.uid;
+      if (!ownerId) return;
+
+      const q = query(collection(db, 'sales'), where('userId', '==', ownerId));
       const snapshot = await getDocs(q);
       const allSales = snapshot.docs.map(doc => ({
         id: doc.id,
@@ -57,7 +61,6 @@ export default function DashboardPage() {
       
       allSales.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       
-      // Fechas
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       
@@ -67,27 +70,22 @@ export default function DashboardPage() {
       const monthAgo = new Date(today);
       monthAgo.setMonth(monthAgo.getMonth() - 1);
 
-      // Filtrar
       const salesToday = allSales.filter(s => new Date(s.createdAt) >= today);
       const salesWeek = allSales.filter(s => new Date(s.createdAt) >= weekAgo);
       const salesMonth = allSales.filter(s => new Date(s.createdAt) >= monthAgo);
 
-      // Stats
       const statsSalesToday = salesToday.reduce((sum, s) => sum + s.total, 0);
       const statsSalesWeek = salesWeek.reduce((sum, s) => sum + s.total, 0);
       const statsSalesMonth = salesMonth.reduce((sum, s) => sum + s.total, 0);
 
-      // Productos
-      const qProducts = query(collection(db, 'products'), where('userId', '==', user?.uid));
+      const qProducts = query(collection(db, 'products'), where('userId', '==', ownerId));
       const snapProducts = await getDocs(qProducts);
       const products = snapProducts.docs.map(doc => doc.data());
       const totalProducts = products.length;
       const lowStock = products.filter((p: any) => p.stock < 10).length;
 
-      // Últimas 5 ventas
       setRecentSales(allSales.slice(0, 5));
 
-      // Productos más vendidos
       const productSales: { [key: string]: { name: string; qty: number } } = {};
       allSales.forEach(sale => {
         if (sale.productsList) {
@@ -105,10 +103,8 @@ export default function DashboardPage() {
       const top = Object.values(productSales)
         .sort((a: any, b: any) => b.qty - a.qty)
         .slice(0, 5);
-      console.log('Top products:', top);
       setTopProducts(top);
 
-      // Ventas por categoría
       const categorySales: { [key: string]: number } = {};
       allSales.forEach(sale => {
         if (sale.productsList) {
@@ -119,10 +115,8 @@ export default function DashboardPage() {
         }
       });
       const catData = Object.entries(categorySales).map(([name, value]) => ({ name, value }));
-      console.log('Category data:', catData);
       setCategoryData(catData);
 
-      // Datos semanales
       const weekData = [];
       for (let i = 6; i >= 0; i--) {
         const date = new Date(today);
@@ -142,7 +136,6 @@ export default function DashboardPage() {
       }
       setWeeklyData(weekData);
 
-      // Datos mensuales (6 meses)
       const monthData = [];
       for (let i = 5; i >= 0; i--) {
         const date = new Date(today);
@@ -162,7 +155,6 @@ export default function DashboardPage() {
           ventas: monthSales.reduce((sum, s) => sum + s.total, 0),
         });
       }
-      console.log('Monthly data:', monthData);
       setMonthlyData(monthData);
 
       setStats({
@@ -188,7 +180,7 @@ export default function DashboardPage() {
     });
   };
 
-  if (!user) {
+  if (!user && !getOwnerId()) {
     return (
       <div className="p-6 flex flex-col items-center justify-center h-[60vh]">
         <h2 className="text-xl font-semibold mb-2">Inicia sesión</h2>
@@ -205,7 +197,6 @@ export default function DashboardPage() {
     <div className="p-6">
       <h1 className="text-2xl font-bold mb-6">Dashboard</h1>
 
-      {/* Stats Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <Card>
           <CardHeader className="pb-2">
@@ -255,7 +246,6 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* Charts Row 1 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         <Card>
           <CardHeader>
@@ -298,7 +288,6 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* Charts Row 2 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         <Card>
           <CardHeader>
@@ -363,7 +352,6 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* Últimas Ventas */}
       <Card>
         <CardHeader>
           <CardTitle>Últimas Ventas</CardTitle>

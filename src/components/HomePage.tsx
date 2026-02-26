@@ -2,15 +2,16 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { BrowserMultiFormatReader } from '@zxing/library';
-import { Search, ScanLine, Package, ShoppingCart, Plus, Minus, Trash2, CreditCard, DollarSign, Wallet } from 'lucide-react';
+import { Search, ScanLine, Package, ShoppingCart, Plus, Minus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { useAuthState } from 'react-firebase-hooks/auth';
-import { collection, getDocs, doc, updateDoc, addDoc, query, where, increment } from 'firebase/firestore';
+import { collection, getDocs, getDoc, doc, updateDoc, addDoc, query, where, increment, setDoc } from 'firebase/firestore';
 import { auth, db } from '@/src/lib/firebase';
+import { getOwnerId } from '@/src/lib/userId';
 
 interface Product {
   id: string;
@@ -21,6 +22,8 @@ interface Product {
   barcode: string;
   cost_price: number;
   userId: string;
+  image?: string;
+  variants?: Record<string, string>;
 }
 
 interface CartItem extends Product {
@@ -47,14 +50,13 @@ const BarcodeScanner = ({ open, onClose, onScan }: BarcodeScannerProps) => {
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const [error, setError] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
+  
 
   useEffect(() => {
     if (!open) return;
-
     setError('');
     setIsLoading(true);
 
-    // Verificar si el dispositivo tiene cámara
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       setError('Tu navegador no soporta acceso a cámara');
       setIsLoading(false);
@@ -63,11 +65,9 @@ const BarcodeScanner = ({ open, onClose, onScan }: BarcodeScannerProps) => {
 
     const initScanner = async () => {
       try {
-        // Primero verificar permisos
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
         stream.getTracks().forEach(track => track.stop());
 
-        // Iniciar lector
         readerRef.current = new BrowserMultiFormatReader();
         const devices = await readerRef.current.listVideoInputDevices();
         
@@ -77,7 +77,6 @@ const BarcodeScanner = ({ open, onClose, onScan }: BarcodeScannerProps) => {
           return;
         }
 
-        // Buscar cámara trasera
         const backCamera = devices.find((d: any) => 
           d.label.toLowerCase().includes('back') || 
           d.label.toLowerCase().includes('rear') ||
@@ -92,25 +91,19 @@ const BarcodeScanner = ({ open, onClose, onScan }: BarcodeScannerProps) => {
               onScan(result.getText());
               handleClose();
             }
-            if (err && err.name !== 'NotFoundException') {
-              console.log('Escaneo:', err);
-            }
           }
         );
         
         setIsLoading(false);
       } catch (err: any) {
-        console.error('Error completo:', err);
+        console.error('Error:', err);
         setIsLoading(false);
-        
         if (err.name === 'NotAllowedError') {
-          setError('Permiso denegado. Haz clic en el candado de la URL y permite la cámara.');
-        } else if (err.name === 'NotReadableError') {
-          setError('La cámara está siendo usada por otra aplicación. Ciérrala e intenta de nuevo.');
+          setError('Permiso denegado. Permite la cámara.');
         } else if (err.name === 'NotFoundError') {
-          setError('No se encontró cámara en este dispositivo');
+          setError('No se encontró cámara');
         } else {
-          setError('Error al acceder a la cámara: ' + err.message);
+          setError('Error al acceder a la cámara');
         }
       }
     };
@@ -119,22 +112,14 @@ const BarcodeScanner = ({ open, onClose, onScan }: BarcodeScannerProps) => {
 
     return () => {
       if (readerRef.current) {
-        try {
-          readerRef.current.reset();
-        } catch (e) {
-          console.log('Error al resetear:', e);
-        }
+        try { readerRef.current.reset(); } catch (e) {}
       }
     };
   }, [open, onScan]);
 
   const handleClose = () => {
     if (readerRef.current) {
-      try {
-        readerRef.current.reset();
-      } catch (e) {
-        console.log('Error al cerrar:', e);
-      }
+      try { readerRef.current.reset(); } catch (e) {}
     }
     onClose();
   };
@@ -161,7 +146,6 @@ const BarcodeScanner = ({ open, onClose, onScan }: BarcodeScannerProps) => {
         
         {error && !isLoading ? (
           <div className="text-center py-8">
-            <ScanLine className="h-12 w-12 mx-auto mb-4 text-red-400" />
             <p className="text-red-500 font-medium">{error}</p>
             <Button variant="outline" className="mt-4" onClick={handleClose}>Cerrar</Button>
           </div>
@@ -180,15 +164,14 @@ const BarcodeScanner = ({ open, onClose, onScan }: BarcodeScannerProps) => {
   );
 };
 
-interface ProductCardProps {
-  product: Product;
-  onAdd: (product: Product) => void;
-}
-
-const ProductCard = ({ product, onAdd }: ProductCardProps) => (
+const ProductCard = ({ product, onAdd }: { product: Product; onAdd: (product: Product) => void }) => (
   <Card className="cursor-pointer hover:shadow-lg hover:border-primary/30 transition-all duration-200 active:scale-95 overflow-hidden" onClick={() => onAdd(product)}>
     <div className="aspect-square bg-gradient-to-br from-muted/50 to-muted flex items-center justify-center relative min-h-[100px] sm:min-h-[120px]">
-      <Package className="h-10 w-10 sm:h-12 sm:w-12 text-muted-foreground/30" />
+      {product.image ? (
+        <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+      ) : (
+        <Package className="h-10 w-10 sm:h-12 sm:w-12 text-muted-foreground/30" />
+      )}
       {(product.stock ?? 0) < 10 && <Badge className="absolute top-1.5 right-1.5 bg-red-500 text-white text-[10px]">{product.stock ?? 0}</Badge>}
     </div>
     <CardContent className="p-2 sm:p-3">
@@ -199,18 +182,9 @@ const ProductCard = ({ product, onAdd }: ProductCardProps) => (
   </Card>
 );
 
-interface CartProps {
-  items: CartItem[];
-  onUpdateQty: (productId: string, newQty: number) => void;
-  onRemove: (productId: string) => void;
-  onCheckout: (paymentMethod: string) => void;
-  processing: boolean;
-}
-
-const Cart = ({ items, onUpdateQty, onRemove, onCheckout, processing }: CartProps) => {
+const Cart = ({ items, onUpdateQty, onRemove, onCheckout, processing }: { items: CartItem[]; onUpdateQty: (productId: string, newQty: number) => void; onRemove: (productId: string) => void; onCheckout: (paymentMethod: string) => void; processing: boolean }) => {
   const subtotal = items.reduce((sum, item) => sum + (item.price * item.qty), 0);
 
-  // En el Cart, cuando está vacío muestra un indicador
   if (items.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-2">
@@ -275,27 +249,103 @@ export default function HomePage() {
   const [categories, setCategories] = useState<string[]>(['Todos']);
   const [selectedCategory, setSelectedCategory] = useState('Todos');
   const [cartExpanded, setCartExpanded] = useState(false);
+  const [employeeData, setEmployeeData] = useState<any>(null);
 
-  // Cuando hay productos, expandir el carrito
-  useEffect(() => {
-    if (cart.length > 0) {
-      setCartExpanded(true);
-    } else {
-      setCartExpanded(false);
-    }
-  }, [cart.length]);
 
-  useEffect(() => { setMounted(true); }, []);
-  useEffect(() => { if (mounted && user) loadProducts(); }, [mounted, user]);
+ useEffect(() => {
+  if (cart.length > 0) setCartExpanded(true);
+  else setCartExpanded(false);
+}, [cart.length]);
 
-  const loadProducts = async () => {
+useEffect(() => { setMounted(true); }, []);
+
+useEffect(() => {
+  if (!mounted) return;
+  
+  const ownerId = getOwnerId() || user?.uid;
+  
+  if (!ownerId) {
+    setProducts([]);
+    setCart([]);
+    setCategories(['Todos']);
+    setSelectedCategory('Todos');
+  } else {
+    loadProducts(ownerId);
+  }
+}, [mounted, user, loading]);
+
+useEffect(() => {
+  if (!mounted) return;
+  
+  const ownerId = getOwnerId();
+  if (ownerId) {
+    loadProducts(ownerId);
+  }
+}, [mounted, user, loading]); // <-- AGREGAR 'loading'
+
+
+useEffect(() => {
+  const stored = localStorage.getItem('employeeData');
+  if (stored) {
+    setEmployeeData(JSON.parse(stored));
+  }
+}, []);
+
+
+const [isOwner, setIsOwner] = useState(false);
+
+useEffect(() => {
+  const checkIfOwner = async () => {
+    if (!user) return;
+    
     try {
-      const q = query(collection(db, 'products'), where('userId', '==', user?.uid));
+      // Verificar si es owner
+      const ownerDoc = await getDoc(doc(db, 'owners', user.uid));
+      
+      if (ownerDoc.exists()) {
+        setIsOwner(true);
+      } else {
+        // Si no es owner, verificar si es empleado
+        const empQuery = query(
+          collection(db, 'employees'), 
+          where('userId', '==', user.uid)
+        );
+        const empSnap = await getDocs(empQuery);
+        
+        if (empSnap.empty) {
+          // No es owner ni empleado - crear como owner automáticamente
+          await setDoc(doc(db, 'owners', user.uid), {
+            email: user.email,
+            name: user.displayName || 'Dueño',
+            createdAt: new Date().toISOString()
+          });
+          setIsOwner(true);
+        } else {
+          setIsOwner(false);
+        }
+      }
+    } catch (error) {
+      console.error('Error:', error);
+    }
+  };
+  
+  checkIfOwner();
+}, [user]);
+
+
+
+  const loadProducts = async (ownerId: string) => {
+    try {
+      const q = query(collection(db, 'products'), where('userId', '==', ownerId));
       const snapshot = await getDocs(q);
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
       setProducts(data);
       setCategories(['Todos', ...new Set(data.map(p => p.category))]);
-    } catch (error) { console.error('Error:', error); }
+    } catch (error) { 
+      console.error('Error:', error); 
+      setProducts([]);
+      setCart([]);
+    }
   };
 
   const filteredProducts = products.filter(p => {
@@ -315,13 +365,12 @@ export default function HomePage() {
     });
   };
 
-  const updateQty = (productId: string, newQty: number) => { if (newQty <= 0) { setCart(prev => prev.filter(item => item.id !== productId)); return; }
-
-const product = products.find(p => p.id === productId);
-
-if (newQty > (product?.stock ?? 0)) { toast.error('Sin stock'); return; }
-
-setCart(prev => prev.map(item => item.id === productId ? { ...item, qty: newQty } : item)); };
+  const updateQty = (productId: string, newQty: number) => {
+    if (newQty <= 0) { setCart(prev => prev.filter(item => item.id !== productId)); return; }
+    const product = products.find(p => p.id === productId);
+    if (newQty > (product?.stock ?? 0)) { toast.error('Sin stock'); return; }
+    setCart(prev => prev.map(item => item.id === productId ? { ...item, qty: newQty } : item));
+  };
 
   const removeFromCart = (productId: string) => setCart(prev => prev.filter(item => item.id !== productId));
 
@@ -332,73 +381,138 @@ setCart(prev => prev.map(item => item.id === productId ? { ...item, qty: newQty 
   };
 
   const handleCheckout = async (paymentMethod: string) => {
-    if (!user) { toast.error('Inicia sesión'); return; }
-    if (cart.length === 0) { toast.error('Carrito vacío'); return; }
-    setProcessing(true);
-    try {
-      const saleData = {
-        userId: user.uid,
-        total: cart.reduce((sum, item) => sum + (item.price * item.qty), 0),
-        items: cart.reduce((sum, item) => sum + item.qty, 0),
-        paymentMethod,
-        products: cart.map(item => item.name + ' x' + item.qty).join(', '),
-        productsList: cart.map(item => ({ name: item.name, qty: item.qty, price: item.price, category: item.category })),
-        createdAt: new Date().toISOString()
-      };
-      await addDoc(collection(db, 'sales'), saleData);
-      for (const item of cart) {
-        await updateDoc(doc(db, 'products', item.id), { stock: increment(-item.qty) });
-      }
-      toast.success('Venta: ' + formatPrice(saleData.total));
-      setCart([]);
-      loadProducts();
-    } catch (error) { console.error('Error:', error); toast.error('Error'); }
-    finally { setProcessing(false); }
-  };
+  const ownerId = getOwnerId() || user?.uid;
+  if (!ownerId) { toast.error('Inicia sesión'); return; }
+  if (cart.length === 0) { toast.error('Carrito vacío'); return; }
+  setProcessing(true);
+  try {
+    const total = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
+    
+    // Si es el dueño (no hay employeeData), se lleva el 100%
+    const isOwner = !employeeData?.id;
+
+    // Si es owner, 100% de comisión
+    const employeeCommissionPercent = isOwner ? 100 : (employeeData?.commissionPercent || 10);
+
+    const saleData = {
+      userId: ownerId,
+      total,
+      items: cart.reduce((sum, item) => sum + item.qty, 0),
+      paymentMethod,
+      products: cart.map(item => item.name + ' x' + item.qty).join(', '),
+      productsList: cart.map(item => ({ 
+        name: item.name, 
+        qty: item.qty, 
+        price: item.price,
+        costPrice: item.cost_price || 0,
+        category: item.category 
+      })),
+      createdAt: new Date().toISOString(),
+      employeeId: isOwner ? 'owner' : (employeeData?.id || null),
+      employeeName: isOwner ? 'DUEÑO' : (employeeData?.name || null),
+      employeeCommissionPercent: employeeCommissionPercent
+    };
+
+    await addDoc(collection(db, 'sales'), saleData);
+    for (const item of cart) {
+      await updateDoc(doc(db, 'products', item.id), { stock: increment(-item.qty) });
+    }
+    toast.success('Venta: ' + formatPrice(total));
+    setCart([]);
+    loadProducts(ownerId);
+  } catch (error) { console.error('Error:', error); toast.error('Error'); }
+  finally { setProcessing(false); }
+};
 
   if (!mounted || loading) return <div className="p-6"><h1>Cargando...</h1></div>;
 
-  if (!user) return (
+const ownerId = getOwnerId() || user?.uid;
+
+if (!ownerId) {
+  return (
     <div className="p-6 flex flex-col items-center justify-center h-[60vh]">
       <ShoppingCart className="h-20 w-20 text-muted-foreground/20 mb-4" />
       <h2 className="text-xl font-semibold mb-2">Inicia sesión</h2>
     </div>
   );
+}
 
+// Si no hay owner, no renderiza productos
+if (!ownerId) {
   return (
-    <div className="flex flex-col lg:flex-row h-[calc(100vh-60px)]">
+    <div className="p-6 flex flex-col items-center justify-center h-[60vh]">
+      <ShoppingCart className="h-20 w-20 text-muted-foreground/20 mb-4" />
+      <h2 className="text-xl font-semibold mb-2">Inicia sesión</h2>
+    </div>
+  );
+}
+
+return (
+  <div className="flex flex-col lg:flex-row h-[calc(100vh-60px)]">
       <div className="flex-1 flex flex-col overflow-hidden">
         <div className="p-4 border-b bg-card/50">
           <div className="flex gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Buscar..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9 h-11" />
+              <Input 
+                placeholder="Buscar..." 
+                value={search} 
+                onChange={(e) => setSearch(e.target.value)} 
+                className="pl-9 h-11" 
+              />
             </div>
-            <Button variant="outline" onClick={() => setScannerOpen(true)} className="h-11"><ScanLine className="h-4 w-4" /></Button>
+                        <Button variant="outline" onClick={() => setScannerOpen(true)} className="h-11">
+              <ScanLine className="h-4 w-4" />
+            </Button>
           </div>
         </div>
+        
         <div className="border-b overflow-x-auto">
           <div className="flex gap-2 px-4 py-2">
             {categories.map((cat) => (
-              <Badge key={cat} variant={selectedCategory === cat ? 'default' : 'secondary'} className="cursor-pointer" onClick={() => setSelectedCategory(cat)}>{cat}</Badge>
+              <Badge 
+                key={cat} 
+                variant={selectedCategory === cat ? 'default' : 'secondary'} 
+                className="cursor-pointer" 
+                onClick={() => setSelectedCategory(cat)}
+              >
+                {cat}
+              </Badge>
             ))}
           </div>
         </div>
+        
         <div className="flex-1 overflow-y-auto p-4">
           {filteredProducts.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-muted-foreground"><Package className="h-16 w-16 opacity-20 mb-4" /><p>No hay productos</p></div>
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+              <Package className="h-16 w-16 opacity-20 mb-4" />
+              <p>No hay productos</p>
+            </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
-              {filteredProducts.map((product) => <ProductCard key={product.id} product={product} onAdd={addToCart} />)}
+              {filteredProducts.map((product) => (
+                <ProductCard key={product.id} product={product} onAdd={addToCart} />
+              ))}
             </div>
           )}
         </div>
       </div>
+      
       <div className={`lg:w-96 h-[20vh] sm:h-[20vh] ${cartExpanded ? 'sm:h-[40vh]' : ''} lg:h-full border-t lg:border-t-0 lg:border-l bg-card transition-all duration-300`}>
-        <Cart items={cart} onUpdateQty={updateQty} onRemove={removeFromCart} onCheckout={handleCheckout} processing={processing} />
+        <Cart 
+          items={cart} 
+          onUpdateQty={updateQty} 
+          onRemove={removeFromCart} 
+          onCheckout={handleCheckout} 
+          processing={processing} 
+        />
       </div>
-      <BarcodeScanner open={scannerOpen} onClose={() => setScannerOpen(false)} onScan={handleScan} />
+      
+      <BarcodeScanner 
+        open={scannerOpen} 
+        onClose={() => setScannerOpen(false)} 
+        onScan={handleScan} 
+      />    
     </div>
   );
 }
-
