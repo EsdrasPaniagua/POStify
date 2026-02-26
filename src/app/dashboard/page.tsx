@@ -1,98 +1,243 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { DollarSign, ShoppingCart, Package, TrendingUp, TrendingDown, Users, CreditCard, Wallet, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { DollarSign, ShoppingCart, Package, Calendar } from 'lucide-react';
+import { useAuthState } from 'react-firebase-hooks/auth';
+import { collection, getDocs, query, where } from 'firebase/firestore';
+import { auth, db } from '@/src/lib/firebase';
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell
+} from 'recharts';
 
-// Datos de ejemplo
-const stats = {
-  salesToday: 125.50,
-  salesYesterday: 112.00,
-  transactionsToday: 24,
-  transactionsYesterday: 19,
-  products: 156,
-  lowStock: 3,
-  totalClients: 89,
-  newClientsToday: 5,
-};
+interface Sale {
+  id: string;
+  total: number;
+  items: number;
+  paymentMethod: string;
+  products: string;
+  productsList?: any[];
+  createdAt: string;
+}
 
-const weeklySales = [
-  { day: 'Lun', sales: 450, transactions: 32 },
-  { day: 'Mar', sales: 520, transactions: 41 },
-  { day: 'Mié', sales: 380, transactions: 28 },
-  { day: 'Jue', sales: 610, transactions: 48 },
-  { day: 'Vie', sales: 720, transactions: 56 },
-  { day: 'Sáb', sales: 890, transactions: 67 },
-  { day: 'Dom', sales: 340, transactions: 25 },
-];
-
-const topProducts = [
-  { name: 'Coca Cola 600ml', sales: 45, revenue: 67.50 },
-  { name: 'Galletas Oreo', sales: 32, revenue: 40.00 },
-  { name: 'Papas Sabritas', sales: 28, revenue: 28.00 },
-  { name: 'Agua Natural 500ml', sales: 25, revenue: 18.75 },
-  { name: 'Cerveza Corona', sales: 18, revenue: 36.00 },
-];
-
-const recentSales = [
-  { id: '1', time: '14:32', total: 25.50, items: 3, payment: 'cash' },
-  { id: '2', time: '13:15', total: 12.00, items: 2, payment: 'card' },
-  { id: '3', time: '12:00', total: 45.75, items: 5, payment: 'transfer' },
-  { id: '4', time: '10:45', total: 8.50, items: 1, payment: 'cash' },
-  { id: '5', time: '09:30', total: 33.25, items: 4, payment: 'card' },
-];
+const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d', '#ffc658', '#ff7300'];
 
 export default function DashboardPage() {
-  const salesChange = ((stats.salesToday - stats.salesYesterday) / stats.salesYesterday * 100).toFixed(1);
-  const transactionsChange = ((stats.transactionsToday - stats.transactionsYesterday) / stats.transactionsYesterday * 100).toFixed(1);
-  const maxSales = Math.max(...weeklySales.map(s => s.sales));
+  const [user, loading] = useAuthState(auth);
+  const [stats, setStats] = useState({
+    salesToday: 0,
+    salesWeek: 0,
+    salesMonth: 0,
+    transactionsToday: 0,
+    totalProducts: 0,
+    lowStock: 0
+  });
+  const [recentSales, setRecentSales] = useState<any[]>([]);
+  const [topProducts, setTopProducts] = useState<any[]>([]);
+  const [categoryData, setCategoryData] = useState<any[]>([]);
+  const [weeklyData, setWeeklyData] = useState<any[]>([]);
+  const [monthlyData, setMonthlyData] = useState<any[]>([]);
 
-  const getPaymentLabel = (payment: string) => {
-    switch (payment) {
-      case 'cash': return 'Efectivo';
-      case 'card': return 'Tarjeta';
-      case 'transfer': return 'Transferencia';
-      default: return payment;
+  useEffect(() => {
+    if (user) {
+      loadStats();
+    }
+  }, [user]);
+
+  const loadStats = async () => {
+    try {
+      const q = query(collection(db, 'sales'), where('userId', '==', user?.uid));
+      const snapshot = await getDocs(q);
+      const allSales = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Sale[];
+      
+      allSales.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      
+      // Fechas
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const weekAgo = new Date(today);
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      
+      const monthAgo = new Date(today);
+      monthAgo.setMonth(monthAgo.getMonth() - 1);
+
+      // Filtrar
+      const salesToday = allSales.filter(s => new Date(s.createdAt) >= today);
+      const salesWeek = allSales.filter(s => new Date(s.createdAt) >= weekAgo);
+      const salesMonth = allSales.filter(s => new Date(s.createdAt) >= monthAgo);
+
+      // Stats
+      const statsSalesToday = salesToday.reduce((sum, s) => sum + s.total, 0);
+      const statsSalesWeek = salesWeek.reduce((sum, s) => sum + s.total, 0);
+      const statsSalesMonth = salesMonth.reduce((sum, s) => sum + s.total, 0);
+
+      // Productos
+      const qProducts = query(collection(db, 'products'), where('userId', '==', user?.uid));
+      const snapProducts = await getDocs(qProducts);
+      const products = snapProducts.docs.map(doc => doc.data());
+      const totalProducts = products.length;
+      const lowStock = products.filter((p: any) => p.stock < 10).length;
+
+      // Últimas 5 ventas
+      setRecentSales(allSales.slice(0, 5));
+
+      // Productos más vendidos
+      const productSales: { [key: string]: { name: string; qty: number } } = {};
+      allSales.forEach(sale => {
+        if (sale.productsList) {
+          sale.productsList.forEach((p: any) => {
+            const key = p.name;
+            if (productSales[key]) {
+              productSales[key].qty += p.qty;
+            } else {
+              productSales[key] = { name: p.name, qty: p.qty };
+            }
+          });
+        }
+      });
+      
+      const top = Object.values(productSales)
+        .sort((a: any, b: any) => b.qty - a.qty)
+        .slice(0, 5);
+      console.log('Top products:', top);
+      setTopProducts(top);
+
+      // Ventas por categoría
+      const categorySales: { [key: string]: number } = {};
+      allSales.forEach(sale => {
+        if (sale.productsList) {
+          sale.productsList.forEach((p: any) => {
+            const cat = p.category || 'Sin categoría';
+            categorySales[cat] = (categorySales[cat] || 0) + (p.price * p.qty);
+          });
+        }
+      });
+      const catData = Object.entries(categorySales).map(([name, value]) => ({ name, value }));
+      console.log('Category data:', catData);
+      setCategoryData(catData);
+
+      // Datos semanales
+      const weekData = [];
+      for (let i = 6; i >= 0; i--) {
+        const date = new Date(today);
+        date.setDate(date.getDate() - i);
+        const nextDate = new Date(date);
+        nextDate.setDate(nextDate.getDate() + 1);
+        
+        const daySales = allSales.filter(s => {
+          const saleDate = new Date(s.createdAt);
+          return saleDate >= date && saleDate < nextDate;
+        });
+        
+        weekData.push({
+          day: date.toLocaleDateString('es-ES', { weekday: 'short' }),
+          ventas: daySales.reduce((sum, s) => sum + s.total, 0),
+        });
+      }
+      setWeeklyData(weekData);
+
+      // Datos mensuales (6 meses)
+      const monthData = [];
+      for (let i = 5; i >= 0; i--) {
+        const date = new Date(today);
+        date.setMonth(date.getMonth() - i);
+        date.setDate(1);
+        
+        const nextDate = new Date(date);
+        nextDate.setMonth(nextDate.getMonth() + 1);
+        
+        const monthSales = allSales.filter(s => {
+          const saleDate = new Date(s.createdAt);
+          return saleDate >= date && saleDate < nextDate;
+        });
+        
+        monthData.push({
+          mes: date.toLocaleDateString('es-ES', { month: 'short' }),
+          ventas: monthSales.reduce((sum, s) => sum + s.total, 0),
+        });
+      }
+      console.log('Monthly data:', monthData);
+      setMonthlyData(monthData);
+
+      setStats({
+        salesToday: statsSalesToday,
+        salesWeek: statsSalesWeek,
+        salesMonth: statsSalesMonth,
+        transactionsToday: salesToday.length,
+        totalProducts,
+        lowStock
+      });
+    } catch (error) {
+      console.error('Error:', error);
     }
   };
+
+  const formatDate = (dateStr: string) => {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('es-ES', {
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  if (!user) {
+    return (
+      <div className="p-6 flex flex-col items-center justify-center h-[60vh]">
+        <h2 className="text-xl font-semibold mb-2">Inicia sesión</h2>
+        <p className="text-muted-foreground">Necesitas iniciar sesión para ver el dashboard</p>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return <div className="p-6"><h1>Cargando...</h1></div>;
+  }
 
   return (
     <div className="p-6">
       <h1 className="text-2xl font-bold mb-6">Dashboard</h1>
 
-      {/* Tarjetas de estadísticas principales */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <Card className="overflow-hidden">
-          <div className="h-2 bg-gradient-to-r from-green-400 to-green-600" />
+      {/* Stats Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Ventas Hoy</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Día Neto</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="flex items-end justify-between">
-              <div>
-                <p className="text-3xl font-bold">${stats.salesToday.toFixed(2)}</p>
-                <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
-                  {parseFloat(salesChange) >= 0 ? (
-                    <ArrowUpRight className="h-3 w-3 text-green-500" />
-                  ) : (
-                    <ArrowDownRight className="h-3 w-3 text-red-500" />
-                  )}
-                  <span className={parseFloat(salesChange) >= 0 ? 'text-green-500' : 'text-red-500'}>
-                    {salesChange}%
-                  </span>
-                  vs ayer
-                </p>
-              </div>
-              <div className="p-3 bg-green-100 rounded-xl">
-                <DollarSign className="h-6 w-6 text-green-600" />
-              </div>
-            </div>
+            <p className="text-3xl font-bold text-green-600">${stats.salesToday.toFixed(2)}</p>
+            <p className="text-xs text-muted-foreground mt-1">Hoy</p>
           </CardContent>
         </Card>
 
-        <Card className="overflow-hidden">
-          <div className="h-2 bg-gradient-to-r from-blue-400 to-blue-600" />
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Semana Neta</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-3xl font-bold text-blue-600">${stats.salesWeek.toFixed(2)}</p>
+            <p className="text-xs text-muted-foreground mt-1">Últimos 7 días</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Mes Neto</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-3xl font-bold text-purple-600">${stats.salesMonth.toFixed(2)}</p>
+            <p className="text-xs text-muted-foreground mt-1">Últimos 30 días</p>
+          </CardContent>
+        </Card>
+
+        <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Transacciones</CardTitle>
           </CardHeader>
@@ -100,197 +245,156 @@ export default function DashboardPage() {
             <div className="flex items-end justify-between">
               <div>
                 <p className="text-3xl font-bold">{stats.transactionsToday}</p>
-                <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
-                  {parseFloat(transactionsChange) >= 0 ? (
-                    <ArrowUpRight className="h-3 w-3 text-green-500" />
-                  ) : (
-                    <ArrowDownRight className="h-3 w-3 text-red-500" />
-                  )}
-                  <span className={parseFloat(transactionsChange) >= 0 ? 'text-green-500' : 'text-red-500'}>
-                    {transactionsChange}%
-                  </span>
-                  vs ayer
-                </p>
+                <p className="text-xs text-muted-foreground mt-1">Hoy</p>
               </div>
-              <div className="p-3 bg-blue-100 rounded-xl">
-                <ShoppingCart className="h-6 w-6 text-blue-600" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="overflow-hidden">
-          <div className="h-2 bg-gradient-to-r from-purple-400 to-purple-600" />
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Productos</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-end justify-between">
-              <div>
-                <p className="text-3xl font-bold">{stats.products}</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {stats.lowStock} bajo stock
-                </p>
-              </div>
-              <div className="p-3 bg-purple-100 rounded-xl">
-                <Package className="h-6 w-6 text-purple-600" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="overflow-hidden">
-          <div className="h-2 bg-gradient-to-r from-orange-400 to-orange-600" />
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Clientes</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-end justify-between">
-              <div>
-                <p className="text-3xl font-bold">{stats.totalClients}</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  +{stats.newClientsToday} nuevos hoy
-                </p>
-              </div>
-              <div className="p-3 bg-orange-100 rounded-xl">
-                <Users className="h-6 w-6 text-orange-600" />
+              <div className="p-2 bg-blue-100 rounded-lg">
+                <ShoppingCart className="h-5 w-5 text-blue-600" />
               </div>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Segunda fila: Gráfico y Productos top */}
+      {/* Charts Row 1 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        {/* Gráfico de ventas semanal */}
         <Card>
           <CardHeader>
-            <CardTitle>Ventas de la Semana</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5" />
+              Ventas Semanales
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="h-64 flex items-end justify-around gap-2">
-              {weeklySales.map((day, i) => (
-                <div key={i} className="flex flex-col items-center gap-2 flex-1">
-                  <div 
-                    className="w-full bg-gradient-to-t from-primary to-primary/50 rounded-t-lg transition-all hover:opacity-80"
-                    style={{ height: `${(day.sales / maxSales) * 100}%`, minHeight: '20px' }}
-                    title={`$${day.sales}`}
-                  />
-                  <span className="text-xs text-muted-foreground">{day.day}</span>
-                  <span className="text-xs font-medium">${day.sales}</span>
-                </div>
-              ))}
-            </div>
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart data={weeklyData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="day" />
+                <YAxis />
+                <Tooltip formatter={(value) => `$${Number(value).toFixed(2)}`} />
+                <Bar dataKey="ventas" fill="#22c55e" name="Ventas $" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
           </CardContent>
         </Card>
 
-        {/* Productos más vendidos */}
         <Card>
           <CardHeader>
-            <CardTitle>Productos Más Vendidos</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5" />
+              Ventas Mensuales
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {topProducts.map((product, i) => (
-                <div key={i} className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center text-primary font-bold text-sm">
-                      {i + 1}
-                    </div>
-                    <div>
-                      <p className="font-medium">{product.name}</p>
-                      <p className="text-xs text-muted-foreground">{product.sales} ventas</p>
-                    </div>
-                  </div>
-                  <span className="font-bold text-primary">${product.revenue.toFixed(2)}</span>
-                </div>
-              ))}
-            </div>
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart data={monthlyData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="mes" />
+                <YAxis />
+                <Tooltip formatter={(value) => `$${Number(value).toFixed(2)}`} />
+                <Bar dataKey="ventas" fill="#8b5cf6" name="Ventas $" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
           </CardContent>
         </Card>
       </div>
 
-      {/* Tercera fila: Ventas recientes y Métodos de pago */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Ventas recientes */}
+      {/* Charts Row 2 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         <Card>
           <CardHeader>
-            <CardTitle>Ventas Recientes</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <Package className="h-5 w-5" />
+              Ventas por Categoría
+            </CardTitle>
           </CardHeader>
           <CardContent>
+            {categoryData.length === 0 ? (
+              <div className="h-[250px] flex items-center justify-center text-muted-foreground">
+                No hay datos de categorías
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={250}>
+                <PieChart>
+                  <Pie
+                    data={categoryData}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={true}
+                    label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
+                    outerRadius={80}
+                    fill="#8884d8"
+                    dataKey="value"
+                  >
+                    {categoryData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value) => `$${Number(value).toFixed(2)}`} />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Package className="h-5 w-5" />
+              Productos Más Vendidos
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {topProducts.length === 0 ? (
+              <div className="h-[250px] flex items-center justify-center text-muted-foreground">
+                No hay productos vendidos
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={250}>
+                <BarChart data={topProducts} layout="vertical">
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis type="number" />
+                  <YAxis dataKey="name" type="category" width={100} />
+                  <Tooltip />
+                  <Bar dataKey="qty" fill="#f59e0b" name="Cantidad" />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Últimas Ventas */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Últimas Ventas</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {recentSales.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <p>No hay ventas</p>
+            </div>
+          ) : (
             <div className="space-y-3">
               {recentSales.map((sale) => (
-                <div key={sale.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
-                      <ShoppingCart className="h-5 w-5 text-primary" />
+                <div key={sale.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-muted rounded-lg gap-2">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-bold text-lg">${sale.total?.toFixed(2)}</span>
+                      <Badge variant="outline">{sale.paymentMethod}</Badge>
                     </div>
-                    <div>
-                      <p className="font-medium">Venta #{sale.id}</p>
-                      <p className="text-xs text-muted-foreground">{sale.time} • {sale.items} items</p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-bold">${sale.total.toFixed(2)}</p>
-                    <Badge variant="outline" className="text-xs">
-                      {getPaymentLabel(sale.payment)}
-                    </Badge>
+                    <p className="text-sm text-muted-foreground">
+                      {sale.items} items • {formatDate(sale.createdAt)}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {sale.products}
+                    </p>
                   </div>
                 </div>
               ))}
             </div>
-          </CardContent>
-        </Card>
-
-        {/* Métodos de pago */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Métodos de Pago</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between p-4 bg-green-50 rounded-lg border border-green-200">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-green-100 rounded-lg">
-                    <DollarSign className="h-5 w-5 text-green-600" />
-                  </div>
-                  <div>
-                    <p className="font-medium">Efectivo</p>
-                    <p className="text-xs text-muted-foreground">12 transacciones</p>
-                  </div>
-                </div>
-                <p className="font-bold text-green-600">$520.00</p>
-              </div>
-
-              <div className="flex items-center justify-between p-4 bg-blue-50 rounded-lg border border-blue-200">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-blue-100 rounded-lg">
-                    <CreditCard className="h-5 w-5 text-blue-600" />
-                  </div>
-                  <div>
-                    <p className="font-medium">Tarjeta</p>
-                    <p className="text-xs text-muted-foreground">8 transacciones</p>
-                  </div>
-                </div>
-                <p className="font-bold text-blue-600">$340.50</p>
-              </div>
-
-              <div className="flex items-center justify-between p-4 bg-purple-50 rounded-lg border border-purple-200">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-purple-100 rounded-lg">
-                    <Wallet className="h-5 w-5 text-purple-600" />
-                  </div>
-                  <div>
-                    <p className="font-medium">Transferencia</p>
-                    <p className="text-xs text-muted-foreground">4 transacciones</p>
-                  </div>
-                </div>
-                <p className="font-bold text-purple-600">$180.00</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

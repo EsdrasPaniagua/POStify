@@ -1,133 +1,115 @@
 "use client";
 
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import { useState, useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Settings, Store, User, Bell, Save } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { useAuthState } from 'react-firebase-hooks/auth';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { auth, db } from '@/src/lib/firebase';
+import { toast } from 'sonner';
 
 export default function ConfiguracionPage() {
+  const [user, loading] = useAuthState(auth);
+  const [shopName, setShopName] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      loadConfig();
+    }
+  }, [user]);
+
+  const loadConfig = async () => {
+    try {
+      const docRef = doc(db, 'users', user!.uid);
+      const docSnap = await getDoc(docRef);
+      
+      if (docSnap.exists()) {
+        setShopName(docSnap.data().shopName || '');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!user) return;
+    
+    setSaving(true);
+    try {
+      const docRef = doc(db, 'users', user.uid);
+      await updateDoc(docRef, {
+        shopName: shopName
+      });
+      toast.success('Configuración guardada');
+    } catch (error) {
+      console.error('Error:', error);
+      toast.error('Error al guardar');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!user) {
+    return (
+      <div className="p-6 flex flex-col items-center justify-center h-[60vh]">
+        <h2 className="text-xl font-semibold mb-2">Inicia sesión</h2>
+        <p className="text-muted-foreground">Necesitas iniciar sesión para ver la configuración</p>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return <div className="p-6"><h1>Cargando...</h1></div>;
+  }
+
   return (
-    <div className="p-6 max-w-4xl">
+    <div className="p-6">
       <h1 className="text-2xl font-bold mb-6">Configuración</h1>
 
-      <div className="space-y-6">
-        {/* Información de la tienda */}
+      <div className="grid gap-6 max-w-2xl">
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Store className="h-5 w-5" />
-              Información de la Tienda
-            </CardTitle>
-            <CardDescription>
-              Actualiza los datos de tu comercio
-            </CardDescription>
+            <CardTitle>Información de la Tienda</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid gap-2">
-              <Label htmlFor="name">Nombre de la tienda</Label>
-              <Input id="name" defaultValue="Mi Tienda Demo" />
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Nombre de la Tienda</label>
+              <Input
+                placeholder="Mi Tienda"
+                value={shopName}
+                onChange={(e) => setShopName(e.target.value)}
+              />
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="address">Dirección</Label>
-              <Input id="address" placeholder="Calle principal #123" />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="phone">Teléfono</Label>
-              <Input id="phone" placeholder="+52 123 456 7890" />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="tax">Impuesto (%)</Label>
-              <Input id="tax" type="number" defaultValue="16" />
-            </div>
-            <Button className="w-full">
-              <Save className="h-4 w-4 mr-2" />
-              Guardar Cambios
+            <Button onClick={handleSave} disabled={saving}>
+              {saving ? 'Guardando...' : 'Guardar Cambios'}
             </Button>
           </CardContent>
         </Card>
 
-        {/* Perfil de usuario */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <User className="h-5 w-5" />
-              Perfil de Usuario
-            </CardTitle>
-            <CardDescription>
-              Configura tu información personal
-            </CardDescription>
+            <CardTitle>Cuenta</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-2">
-              <Label htmlFor="email">Correo electrónico</Label>
-              <Input id="email" type="email" defaultValue="admin@demo.com" disabled />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="current-password">Contraseña actual</Label>
-              <Input id="current-password" type="password" />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="new-password">Nueva contraseña</Label>
-              <Input id="new-password" type="password" />
-            </div>
-            <Button className="w-full">
-              <Save className="h-4 w-4 mr-2" />
-              Actualizar Contraseña
-            </Button>
-          </CardContent>
-        </Card>
-
-        {/* Notificaciones */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Bell className="h-5 w-5" />
-              Notificaciones
-            </CardTitle>
-            <CardDescription>
-              Configura cómo recibes notificaciones
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium">Stock bajo</p>
-                <p className="text-sm text-muted-foreground">Recibe alertas cuando un producto tenga poco stock</p>
-              </div>
-              <Button variant="outline">Activar</Button>
-            </div>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium">Resumen diario</p>
-                <p className="text-sm text-muted-foreground">Recibe un resumen de ventas cada día</p>
-              </div>
-              <Button variant="outline">Activar</Button>
-            </div>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium">Nuevas funcionalidades</p>
-                <p className="text-sm text-muted-foreground">Sé el primero en conocer nuevas características</p>
-              </div>
-              <Button variant="outline">Activar</Button>
+          <CardContent>
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Email</p>
+              <p className="text-muted-foreground">{user.email}</p>
             </div>
           </CardContent>
         </Card>
 
-        {/* Información de la app */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Settings className="h-5 w-5" />
-              Acerca de POStify
-            </CardTitle>
+            <CardTitle>Acerca de</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground">
               POStify v1.0.0
             </p>
-            <p className="text-sm text-muted-foreground mt-1">
-              Sistema de punto de venta desarrollado con Next.js y Supabase
+            <p className="text-sm text-muted-foreground mt-2">
+              Sistema de punto de venta desarrollado con Next.js y Firebase.
             </p>
           </CardContent>
         </Card>

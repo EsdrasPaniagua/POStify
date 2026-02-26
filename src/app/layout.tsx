@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "sonner";
 import { Sidebar } from "@/src/components/Sidebar";
+import { AdsBanner } from "@/src/components/AdsBanner";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -21,8 +22,11 @@ export default function RootLayout({
       <body className={inter.className} suppressHydrationWarning>
         <div className="flex min-h-screen">
           <Sidebar />
-          <main className="flex-1 min-h-screen bg-background">
-            {children}
+          <main className="flex-1 min-h-screen bg-background overflow-x-hidden">
+            <div className="max-w-full">
+              <AdsBanner />
+              {children}
+            </div>
           </main>
         </div>
         <Toaster position="top-right" richColors />

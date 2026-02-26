@@ -172,7 +172,7 @@ const Cart = ({ items, onUpdateQty, onRemove, onCheckout, processing }: CartProp
         <p className="text-center font-medium">El carrito está vacío</p>
         <p className="text-sm text-center mt-1">Agrega productos</p>
       </div>
-    );
+    ); 
   }
 
   return (
@@ -350,6 +350,12 @@ export default function HomePage() {
         items: cart.reduce((sum, item) => sum + item.qty, 0),
         paymentMethod,
         products: cart.map(item => `${item.name} x${item.qty}`).join(', '),
+        productsList: cart.map(item => ({ 
+        name: item.name, 
+        qty: item.qty, 
+        price: item.price,
+        category: item.category 
+      })),
         createdAt: new Date().toISOString()
       };
 
