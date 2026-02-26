@@ -1,34 +1,32 @@
 "use client";
 
-import { useEffect, useRef } from 'react';
-
-declare global {
-  interface Window {
-    adsbygoogle?: any;
-  }
-}
+import { useEffect } from 'react';
 
 export function AdsBanner() {
-  const bannerRef = useRef<HTMLModElement>(null);
-
   useEffect(() => {
-    if (window.adsbygoogle) {
-      try {
-        (window.adsbygoogle as any).push({});
-      } catch (e) {
-        console.log('AdSense:', e);
+    // Cargar script de AdSense
+    const script = document.createElement('script');
+    script.src = "https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4465711555804592";
+    script.async = true;
+    script.crossOrigin = "anonymous";
+    document.head.appendChild(script);
+
+    return () => {
+      // Limpiar al desmontar
+      const existingScript = document.querySelector('script[src*="googlesyndication"]');
+      if (existingScript) {
+        existingScript.remove();
       }
-    }
+    };
   }, []);
 
   return (
-    <div className="w-full flex justify-center my-4 px-4">
+    <div className="w-full flex justify-center my-4">
       <ins className="adsbygoogle"
-           ref={bannerRef}
-           style={{ display: 'block', width: '100%', maxWidth: '728px', height: '90px' }}
-           data-ad-client="ca-pub-4465711555804592"
-           data-ad-slot="1234567890"
-           data-ad-format="horizontal"
+           style={{ display: 'block' }}
+           data-ad-client="ca-pub-TU_CODIGO"
+           data-ad-slot="TU_SLOT_ID"
+           data-ad-format="auto"
            data-full-width-responsive="true">
       </ins>
     </div>

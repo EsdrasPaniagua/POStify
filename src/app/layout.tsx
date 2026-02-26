@@ -19,9 +19,6 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es">
-      <head>
-        <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4465711555804592" crossOrigin="anonymous" />
-      </head>
       <body className={inter.className} suppressHydrationWarning>
         <div className="flex min-h-screen">
           <Sidebar />
