@@ -9,10 +9,11 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/src/components/Dialog';
 import { Package, Search, Plus, Trash2, Edit2, DollarSign, ShoppingCart, Tag, X, ScanLine } from 'lucide-react';
 import { useAuthState } from 'react-firebase-hooks/auth';
-import { collection, addDoc, updateDoc, deleteDoc, doc, query, where, onSnapshot, getDocs } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc, query, where, onSnapshot, getDocs, getDoc } from 'firebase/firestore';
+
 import { auth, db } from '@/src/lib/firebase';
 import { toast } from 'sonner';
-import { BrowserMultiFormatReader } from '@zxing/library';  
+import { BrowserMultiFormatReader } from '@zxing/library';
 
 
 interface Product {
@@ -24,6 +25,18 @@ interface Product {
   barcode: string;
   cost_price: number;
   userId: string;
+  variants?: Record<string, string>;
+}
+
+interface VariantOption {
+  id: string;
+  name: string;
+}
+
+interface Variant {
+  id: string;
+  name: string;
+  options: VariantOption[];
 }
 
 const formatPrice = (price: number) => {
@@ -35,10 +48,68 @@ const formatPrice = (price: number) => {
   }).replace('ARS', '$');
 };
 
+const ScannerDialog = ({ onScan, onClose }: { onScan: (code: string) => void; onClose: () => void }) => {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const readerRef = useRef<BrowserMultiFormatReader | null>(null);
+
+  useEffect(() => {
+    if (!videoRef.current) return;
+
+    readerRef.current = new BrowserMultiFormatReader();
+
+    readerRef.current.listVideoInputDevices()
+      .then((devices) => {
+        if (devices.length === 0) {
+          toast.error('No se encontró cámara');
+          return;
+        }
+        const back = devices.find((d: any) => d.label.toLowerCase().includes('back')) || devices[0];
+        readerRef.current?.decodeFromVideoDevice(back.deviceId, videoRef.current!, (result) => {
+          if (result) {
+            onScan(result.getText());
+          }
+        });
+      })
+      .catch((err) => {
+        console.error(err);
+        toast.error('Error al acceder a la cámara');
+      });
+
+    return () => {
+      readerRef.current?.reset();
+    };
+  }, [onScan]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div className="bg-card rounded-2xl p-4 w-full max-w-sm shadow-2xl">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-bold flex items-center gap-2">
+            <ScanLine className="h-5 w-5 text-primary" />
+            Escanear Código
+          </h3>
+          <Button variant="ghost" size="icon" onClick={onClose}>X</Button>
+        </div>
+        <div className="relative aspect-video bg-black rounded-lg overflow-hidden">
+          <video ref={videoRef} className="w-full h-full object-cover" />
+        </div>
+        <p className="text-xs text-muted-foreground mt-2 text-center">
+          Apunta la cámara al código de barras
+        </p>
+      </div>
+    </div>
+  );
+};
+
 export default function InventarioPage() {
   const [user, loading] = useAuthState(auth);
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
+  const [variants, setVariants] = useState<Variant[]>([]);
+  const activeVariants = variants.filter(v => 
+  v.options.length > 0 && 
+  products.some(p => p.variants && p.variants[v.id])
+);
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Todos');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -46,6 +117,7 @@ export default function InventarioPage() {
   const [scannerOpen, setScannerOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [newCategory, setNewCategory] = useState('');
+  const [selectedVariantOptions, setSelectedVariantOptions] = useState<Record<string, string>>({});
   
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
@@ -55,11 +127,12 @@ export default function InventarioPage() {
   const [costPrice, setCostPrice] = useState('');
 
   useEffect(() => {
-    if (user) {
-      loadProducts();
-      loadCategories();
-    }
-  }, [user]);
+  if (user) {
+    loadProducts();
+    loadCategories();
+    loadVariants();
+  }
+}, [user]);
 
   const loadProducts = async () => {
     try {
@@ -80,6 +153,20 @@ export default function InventarioPage() {
       setCategories(['Todos', ...cats]);
     } catch (error) { console.error('Error:', error); }
   };
+
+  const loadVariants = async () => {
+  if (!user) return;
+  try {
+    const docRef = doc(db, 'settings', user.uid);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      setVariants(data.variants || []);
+    }
+  } catch (error) { 
+    console.error('Error:', error); 
+  }
+};
 
   const filteredProducts = products.filter(p => {
     const matchCat = selectedCategory === 'Todos' || 
@@ -105,6 +192,7 @@ export default function InventarioPage() {
     setBarcode('');
     setCostPrice('');
     setEditingProduct(null);
+    setSelectedVariantOptions({});
   };
 
   const openNewDialog = () => {
@@ -113,15 +201,16 @@ export default function InventarioPage() {
   };
 
   const openEditDialog = (product: Product) => {
-    setEditingProduct(product);
-    setName(product.name);
-    setPrice(product.price.toString());
-    setStock(product.stock.toString());
-    setCategory(product.category);
-    setBarcode(product.barcode || '');
-    setCostPrice(product.cost_price?.toString() || '');
-    setIsDialogOpen(true);
-  };
+  setEditingProduct(product);
+  setName(product.name);
+  setPrice(product.price.toString());
+  setStock(product.stock.toString());
+  setCategory(product.category);
+  setBarcode(product.barcode || '');
+  setCostPrice(product.cost_price?.toString() || '');
+  setSelectedVariantOptions(product.variants || {});
+  setIsDialogOpen(true);
+};
 
   const handleScan = (code: string) => {
     setBarcode(code);
@@ -135,7 +224,7 @@ export default function InventarioPage() {
       return;
     }
     try {
-      const productData = {
+      const productData: any = {
         name,
         price: parseFloat(price),
         stock: parseInt(stock),
@@ -144,6 +233,15 @@ export default function InventarioPage() {
         cost_price: parseFloat(costPrice) || 0,
         userId: user.uid
       };
+
+      const variantsData: Record<string, string> = {};
+      Object.entries(selectedVariantOptions).forEach(([key, value]) => {
+        if (value) variantsData[key] = value;
+      });
+      if (Object.keys(variantsData).length > 0) {
+        productData.variants = variantsData;
+      }
+
       if (editingProduct) {
         await updateDoc(doc(db, 'products', editingProduct.id), productData);
         toast.success('Producto actualizado');
@@ -225,61 +323,6 @@ export default function InventarioPage() {
   if (loading) {
     return <div className="p-6"><h1>Cargando...</h1></div>;
   }
-
-
-const ScannerDialog = ({ onScan, onClose }: { onScan: (code: string) => void; onClose: () => void }) => {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const readerRef = useRef<BrowserMultiFormatReader | null>(null);
-
-  useEffect(() => {
-    if (!videoRef.current) return;
-
-    readerRef.current = new BrowserMultiFormatReader();
-
-    readerRef.current.listVideoInputDevices()
-      .then((devices) => {
-        if (devices.length === 0) {
-          toast.error('No se encontró cámara');
-          return;
-        }
-        const back = devices.find((d: any) => d.label.toLowerCase().includes('back')) || devices[0];
-        readerRef.current?.decodeFromVideoDevice(back.deviceId, videoRef.current!, (result) => {
-          if (result) {
-            onScan(result.getText());
-          }
-        });
-      })
-      .catch((err) => {
-        console.error(err);
-        toast.error('Error al acceder a la cámara');
-      });
-
-    return () => {
-      readerRef.current?.reset();
-    };
-  }, [onScan]);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-      <div className="bg-card rounded-2xl p-4 w-full max-w-sm shadow-2xl">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-bold flex items-center gap-2">
-            <ScanLine className="h-5 w-5 text-primary" />
-            Escanear Código
-          </h3>
-          <Button variant="ghost" size="icon" onClick={onClose}>X</Button>
-        </div>
-        <div className="relative aspect-video bg-black rounded-lg overflow-hidden">
-          <video ref={videoRef} className="w-full h-full object-cover" />
-        </div>
-        <p className="text-xs text-muted-foreground mt-2 text-center">
-          Apunta la cámara al código de barras
-        </p>
-      </div>
-    </div>
-  );
-};
-
 
   return (
     <div className="p-4 sm:p-6">
@@ -376,140 +419,188 @@ const ScannerDialog = ({ onScan, onClose }: { onScan: (code: string) => void; on
         </CardContent>
       </Card>
 
-      {/* Products List */}
-      <div className="space-y-2">
-        {filteredProducts.map((product) => (
-          <Card key={product.id} className={`hover:shadow-md transition-all ${product.stock < 10 ? 'border-red-300 bg-red-50/50' : ''}`}>
-            <CardContent className="p-3 sm:p-4">
-              <div className="flex items-center gap-3 sm:gap-4">
-                <div className="w-12 h-12 sm:w-16 sm:h-16 bg-muted rounded-lg flex items-center justify-center flex-shrink-0">
-                  <Package className="h-6 w-6 sm:h-8 sm:w-8 text-muted-foreground" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="font-semibold text-sm sm:text-base truncate">{product.name}</h3>
-                    {product.stock < 10 && <Badge variant="destructive" className="text-[10px]">Bajo</Badge>}
-                    <Badge variant="secondary" className="text-xs">{product.category}</Badge>
-                  </div>
-                  <div className="flex items-center gap-2 sm:gap-4 mt-1 text-xs sm:text-sm text-muted-foreground">
-                    <span className="flex items-center gap-1"><Package className="h-3 w-3" /> Stock: {product.stock}</span>
-                    <span className="font-medium text-green-600">{formatPrice(product.price)}</span>
-                    {product.barcode && <span className="hidden sm:inline">Cód: {product.barcode}</span>}
-                  </div>
-                </div>
-                <div className="flex gap-1 flex-shrink-0">
-                  <Button variant="outline" size="icon" onClick={() => openEditDialog(product)}>
-                    <Edit2 className="h-4 w-4" />
-                  </Button>
-                  <Button variant="outline" size="icon" className="text-red-500" onClick={() => handleDelete(product.id)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+      {/* Products Table */}
+<div className="overflow-x-auto">
+  <table className="w-full text-sm">
+    <thead className="border-b bg-muted/50">
+      <tr>
+        <th className="text-left p-2 font-semibold text-xs">Producto</th>
+        {activeVariants.map((v) => (
+          <th key={v.id} className="text-left p-2 font-semibold text-xs">{v.name}</th>
         ))}
-        {filteredProducts.length === 0 && (
-          <div className="text-center py-12 text-muted-foreground">
-            <Package className="h-12 w-12 mx-auto mb-2 opacity-30" />
-            <p>No hay productos</p>
+        <th className="text-right p-2 font-semibold text-xs">Precio</th>
+        <th className="text-right p-2 font-semibold text-xs">Costo</th>
+        <th className="text-left p-2 font-semibold text-xs">Categoría</th>
+        <th className="text-left p-2 font-semibold text-xs">Código</th>
+        <th className="text-center p-2 font-semibold text-xs">Stock</th>
+        <th className="text-center p-2 font-semibold text-xs">Acciones</th>
+      </tr>
+    </thead>
+    <tbody>
+      {filteredProducts.map((product) => (
+        <tr key={product.id} className={`border-b hover:bg-muted/30 ${product.stock < 10 ? 'bg-red-50' : ''}`}>
+          <td className="p-2">
+            <span className="font-medium text-xs">{product.name}</span>
+          </td>
+          {activeVariants.map((v) => (
+            <td key={v.id} className="p-2">
+              <Badge variant="outline" className="text-[10px]">
+                {product.variants?.[v.id] || '-'}
+              </Badge>
+            </td>
+          ))}
+          <td className="p-2 text-right font-medium text-green-600 text-xs">{formatPrice(product.price)}</td>
+          <td className="p-2 text-right text-muted-foreground text-xs">{formatPrice(product.cost_price || 0)}</td>
+          <td className="p-2"><Badge variant="secondary" className="text-[10px]">{product.category}</Badge></td>
+          <td className="p-2 text-muted-foreground text-[10px]">{product.barcode || '-'}</td>
+          <td className="p-2 text-center">
+            <span className={`text-xs font-bold ${product.stock < 10 ? 'text-red-500' : ''}`}>{product.stock}</span>
+          </td>
+          <td className="p-2">
+            <div className="flex justify-center gap-1">
+              <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => openEditDialog(product)}>
+                <Edit2 className="h-3 w-3" />
+              </Button>
+              <Button variant="outline" size="icon" className="h-7 w-7 text-red-500" onClick={() => handleDelete(product.id)}>
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            </div>
+          </td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+  {filteredProducts.length === 0 && (
+    <div className="text-center py-12 text-muted-foreground">
+      <Package className="h-12 w-12 mx-auto mb-2 opacity-30" />
+      <p>No hay productos</p>
+    </div>
+  )}
+</div>
+                    {/* Product Dialog */}
+  <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+    <DialogContent className="max-w-md">
+      <DialogHeader>
+        <DialogTitle>{editingProduct ? 'Editar' : 'Nuevo'} Producto</DialogTitle>
+      </DialogHeader>
+      <div className="space-y-4">
+        <div>
+          <Label>Nombre *</Label>
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nombre" />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <Label>Precio *</Label>
+            <Input type="number" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0.00" />
+          </div>
+          <div>
+            <Label>Stock *</Label>
+            <Input type="number" value={stock} onChange={(e) => setStock(e.target.value)} placeholder="0" />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <Label>Categoría *</Label>
+            <Input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Categoría" list="cats" />
+            <datalist id="cats">
+              {categories.filter(c => c !== 'Todos').map(c => <option key={c} value={c} />)}
+            </datalist>
+          </div>
+          <div>
+            <Label>Costo</Label>
+            <Input type="number" value={costPrice} onChange={(e) => setCostPrice(e.target.value)} placeholder="0.00" />
+          </div>
+        </div>
+        <div>
+          <Label>Código de Barras</Label>
+          <div className="flex gap-2">
+            <Input 
+              value={barcode} 
+              onChange={(e) => setBarcode(e.target.value)} 
+              placeholder="Código de barras" 
+            />
+            <Button variant="outline" type="button" onClick={() => setScannerOpen(true)}>
+              <ScanLine className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+        {variants.length > 0 && (
+          <div className="border-t pt-4 mt-4">
+            <Label className="mb-2 block">Variantes</Label>
+            <div className="space-y-3">
+              {variants.map((variant) => (
+                <div key={variant.id}>
+                  <Label className="text-xs text-muted-foreground">{variant.name}</Label>
+                  <div className="flex flex-wrap gap-2 mt-1">
+                    {variant.options.map((option) => (
+                      <Button
+                        key={option.id}
+                        type="button"
+                        variant={selectedVariantOptions[variant.id] === option.name ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => {
+                          setSelectedVariantOptions(prev => ({
+                            ...prev,
+                            [variant.id]: prev[variant.id] === option.name ? '' : option.name
+                          }));
+                        }}
+                      >
+                        {option.name}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancelar</Button>
+        <Button onClick={handleSave}>Guardar</Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
 
-      {/* Product Dialog */}
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{editingProduct ? 'Editar' : 'Nuevo'} Producto</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label>Nombre *</Label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nombre" />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Precio *</Label>
-                <Input type="number" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0.00" />
-              </div>
-              <div>
-                <Label>Stock *</Label>
-                <Input type="number" value={stock} onChange={(e) => setStock(e.target.value)} placeholder="0" />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Categoría *</Label>
-                <Input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Categoría" list="cats" />
-                <datalist id="cats">
-                  {categories.filter(c => c !== 'Todos').map(c => <option key={c} value={c} />)}
-                </datalist>
-              </div>
-              <div>
-                <Label>Costo</Label>
-                <Input type="number" value={costPrice} onChange={(e) => setCostPrice(e.target.value)} placeholder="0.00" />
-              </div>
-            </div>
-            <div>
-              <Label>Código de Barras</Label>
-              <div className="flex gap-2">
-                <Input 
-                  value={barcode} 
-                  onChange={(e) => setBarcode(e.target.value)} 
-                  placeholder="Código de barras" 
-                />
-                <Button variant="outline" type="button" onClick={() => setScannerOpen(true)}>
-                  <ScanLine className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSave}>Guardar</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+  {/* Categories Dialog */}
+  <Dialog open={isCategoryDialogOpen} onOpenChange={setIsCategoryDialogOpen}>
+    <DialogContent>
+      <DialogHeader>
+        <DialogTitle>Categorías</DialogTitle>
+      </DialogHeader>
+      <div className="space-y-4">
+        <div className="flex gap-2">
+          <Input
+            value={newCategory}
+            onChange={(e) => setNewCategory(e.target.value)}
+            placeholder="Nueva categoría"
+            onKeyDown={(e) => e.key === 'Enter' && handleAddCategory()}
+          />
+          <Button onClick={handleAddCategory}>
+            <Plus className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {categories.filter(c => c !== 'Todos').map((cat) => (
+            <Badge key={cat} variant="outline" className="flex items-center gap-1 px-3 py-1">
+              {cat}
+              <button onClick={() => handleDeleteCategory(cat)}>
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          ))}
+        </div>
+      </div>
+    </DialogContent>
+  </Dialog>
 
-      {/* Categories Dialog */}
-      <Dialog open={isCategoryDialogOpen} onOpenChange={setIsCategoryDialogOpen}>
-  <DialogContent>
-    <DialogHeader>
-      <DialogTitle>Categorías</DialogTitle>
-    </DialogHeader>
-    <div className="space-y-4">
-      <div className="flex gap-2">
-        <Input
-          value={newCategory}
-          onChange={(e) => setNewCategory(e.target.value)}
-          placeholder="Nueva categoría"
-          onKeyDown={(e) => e.key === 'Enter' && handleAddCategory()}
-        />
-        <Button onClick={handleAddCategory}>
-          <Plus className="h-4 w-4" />
-        </Button>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {categories.filter(c => c !== 'Todos').map((cat) => (
-          <Badge key={cat} variant="outline" className="flex items-center gap-1 px-3 py-1">
-            {cat}
-            <button onClick={() => handleDeleteCategory(cat)}>
-              <X className="h-3 w-3" />
-            </button>
-          </Badge>
-        ))}
-      </div>
-    </div>
-  </DialogContent>
-</Dialog>
-{scannerOpen && (
-  <ScannerDialog onScan={(code: string) => {
-    setBarcode(code);
-    setScannerOpen(false);
-    toast.success('Código escaneado');
-  }} onClose={() => setScannerOpen(false)} />
-)}
+  {/* Scanner Dialog */}
+  {scannerOpen && (
+    <ScannerDialog 
+      onScan={handleScan} 
+      onClose={() => setScannerOpen(false)} 
+    />
+  )}
 </div>
-); 
+  );
 }

@@ -2,118 +2,236 @@
 
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
 import { useAuthState } from 'react-firebase-hooks/auth';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '@/src/lib/firebase';
 import { toast } from 'sonner';
+import { Store, Tag, Plus, X, Check, Trash2 } from 'lucide-react';
+
+interface VariantOption {
+  id: string;
+  name: string;
+}
+
+interface Variant {
+  id: string;
+  name: string;
+  options: VariantOption[];
+}
+
+interface StoreSettings {
+  storeName: string;
+  variants: Variant[];
+}
+
+const DEFAULT_VARIANTS: Variant[] = [
+  { id: 'color', name: 'Color', options: [] },
+  { id: 'size', name: 'Talle', options: [] },
+  { id: 'weight', name: 'Peso', options: [] },
+  { id: 'volume', name: 'Volumen', options: [] },
+];
 
 export default function ConfiguracionPage() {
   const [user, loading] = useAuthState(auth);
-  const [shopName, setShopName] = useState('');
+  const [storeName, setStoreName] = useState('');
+  const [variants, setVariants] = useState<Variant[]>(DEFAULT_VARIANTS);
   const [saving, setSaving] = useState(false);
+  const [newVariantName, setNewVariantName] = useState('');
+  const [newOptionName, setNewOptionName] = useState('');
 
   useEffect(() => {
-    if (user) {
-      loadConfig();
-    }
+    if (user) loadSettings();
   }, [user]);
 
-  const loadConfig = async () => {
+  const loadSettings = async () => {
     try {
-      const docRef = doc(db, 'users', user!.uid);
+      const docRef = doc(db, 'settings', user!.uid);
       const docSnap = await getDoc(docRef);
-      
       if (docSnap.exists()) {
-        setShopName(docSnap.data().shopName || '');
+        const data = docSnap.data() as StoreSettings;
+        setStoreName(data.storeName || '');
+        setVariants(data.variants || DEFAULT_VARIANTS);
       }
-    } catch (error) {
-      console.error('Error:', error);
-    }
+    } catch (error) { console.error('Error:', error); }
   };
 
-  const handleSave = async () => {
+  const saveSettings = async () => {
     if (!user) return;
-    
     setSaving(true);
     try {
-      const docRef = doc(db, 'users', user.uid);
-      await updateDoc(docRef, {
-        shopName: shopName
-      });
-      toast.success('Configuración guardada');
-    } catch (error) {
-      console.error('Error:', error);
-      toast.error('Error al guardar');
-    } finally {
-      setSaving(false);
-    }
+      await setDoc(doc(db, 'settings', user.uid), {
+        storeName,
+        variants,
+        userId: user.uid
+      }, { merge: true });
+      toast.success('Guardado');
+    } catch (error) { console.error('Error:', error); toast.error('Error'); }
+    finally { setSaving(false); }
   };
 
-  if (!user) {
-    return (
-      <div className="p-6 flex flex-col items-center justify-center h-[60vh]">
-        <h2 className="text-xl font-semibold mb-2">Inicia sesión</h2>
-        <p className="text-muted-foreground">Necesitas iniciar sesión para ver la configuración</p>
-      </div>
-    );
-  }
+  const addVariant = () => {
+    if (!newVariantName.trim()) {
+      toast.error('Escribe un nombre');
+      return;
+    }
+    const newVariant: Variant = {
+      id: newVariantName.toLowerCase().replace(/\s+/g, '_'),
+      name: newVariantName.trim(),
+      options: []
+    };
+    setVariants(prev => [...prev, newVariant]);
+    setNewVariantName('');
+    toast.success('Variante agregada');
+  };
 
-  if (loading) {
-    return <div className="p-6"><h1>Cargando...</h1></div>;
-  }
+  const deleteVariant = (variantId: string) => {
+    if (!confirm('¿Eliminar esta variante?')) return;
+    setVariants(prev => prev.filter(v => v.id !== variantId));
+  };
+
+  const addOption = (variantId: string) => {
+    if (!newOptionName.trim()) {
+      toast.error('Escribe una opción');
+      return;
+    }
+    setVariants(prev => prev.map(v => {
+      if (v.id === variantId) {
+        const newOption: VariantOption = {
+          id: Date.now().toString(),
+          name: newOptionName.trim()
+        };
+        return { ...v, options: [...v.options, newOption] };
+      }
+      return v;
+    }));
+    setNewOptionName('');
+  };
+
+  const deleteOption = (variantId: string, optionId: string) => {
+    setVariants(prev => prev.map(v => {
+      if (v.id === variantId) {
+        return { ...v, options: v.options.filter(o => o.id !== optionId) };
+      }
+      return v;
+    }));
+  };
+
+  if (!user) return <div className="p-6"><h1>Inicia sesión</h1></div>;
+  if (loading) return <div className="p-6"><h1>Cargando...</h1></div>;
 
   return (
-    <div className="p-6">
+    <div className="p-6 max-w-3xl mx-auto">
       <h1 className="text-2xl font-bold mb-6">Configuración</h1>
 
-      <div className="grid gap-6 max-w-2xl">
-        <Card>
-          <CardHeader>
-            <CardTitle>Información de la Tienda</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Nombre de la Tienda</label>
-              <Input
-                placeholder="Mi Tienda"
-                value={shopName}
-                onChange={(e) => setShopName(e.target.value)}
-              />
-            </div>
-            <Button onClick={handleSave} disabled={saving}>
-              {saving ? 'Guardando...' : 'Guardar Cambios'}
+      {/* Store Name */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Store className="h-5 w-5" />
+            Información de la Tienda
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div>
+            <Label>Nombre de la tienda</Label>
+            <Input 
+              value={storeName} 
+              onChange={(e) => setStoreName(e.target.value)} 
+              placeholder="Mi Tienda" 
+            />
+          </div>
+          <Button onClick={saveSettings} disabled={saving}>
+            {saving ? 'Guardando...' : 'Guardar'}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Variants */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Tag className="h-5 w-5" />
+            Variantes de Productos
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Crea variantes como Color, Talle, Peso, etc. y agrega tus propias opciones
+          </p>
+
+          {/* Add new variant */}
+          <div className="flex gap-2">
+            <Input
+              value={newVariantName}
+              onChange={(e) => setNewVariantName(e.target.value)}
+              placeholder="Nueva variante (ej: Material)"
+              onKeyDown={(e) => e.key === 'Enter' && addVariant()}
+            />
+            <Button onClick={addVariant}>
+              <Plus className="h-4 w-4" />
             </Button>
-          </CardContent>
-        </Card>
+          </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Cuenta</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              <p className="text-sm font-medium">Email</p>
-              <p className="text-muted-foreground">{user.email}</p>
-            </div>
-          </CardContent>
-        </Card>
+          {/* Variants list */}
+          <div className="space-y-4">
+            {variants.map((variant) => (
+              <div key={variant.id} className="border rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="font-semibold text-lg">{variant.name}</span>
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="text-red-500"
+                    onClick={() => deleteVariant(variant.id)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Acerca de</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">
-              POStify v1.0.0
-            </p>
-            <p className="text-sm text-muted-foreground mt-2">
-              Sistema de punto de venta desarrollado con Next.js y Firebase.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+                {/* Options */}
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {variant.options.map((option) => (
+                    <Badge key={option.id} variant="secondary" className="flex items-center gap-1 px-3 py-1">
+                      {option.name}
+                      <button 
+                        onClick={() => deleteOption(variant.id, option.id)}
+                        className="ml-1 text-muted-foreground hover:text-red-500"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+
+                {/* Add option */}
+                <div className="flex gap-2">
+                  <Input
+                    value={newOptionName}
+                    onChange={(e) => setNewOptionName(e.target.value)}
+                    placeholder={`Agregar ${variant.name}...`}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        addOption(variant.id);
+                      }
+                    }}
+                  />
+                  <Button variant="outline" onClick={() => addOption(variant.id)}>
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <Button onClick={saveSettings} disabled={saving} className="w-full">
+            {saving ? 'Guardando...' : 'Guardar Variantes'}
+          </Button>
+        </CardContent>
+      </Card>
     </div>
   );
 }
