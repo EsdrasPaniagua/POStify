@@ -189,7 +189,7 @@ const ProductCard = ({ product, onAdd }: ProductCardProps) => (
   <Card className="cursor-pointer hover:shadow-lg hover:border-primary/30 transition-all duration-200 active:scale-95 overflow-hidden" onClick={() => onAdd(product)}>
     <div className="aspect-square bg-gradient-to-br from-muted/50 to-muted flex items-center justify-center relative min-h-[100px] sm:min-h-[120px]">
       <Package className="h-10 w-10 sm:h-12 sm:w-12 text-muted-foreground/30" />
-      {(product.stock ?? 0) < 10 && <Badge className="absolute top-1.5 right-1.5 bg-red-500 text-white text-[10px]">{product.stock}</Badge>}
+      {(product.stock ?? 0) < 10 && <Badge className="absolute top-1.5 right-1.5 bg-red-500 text-white text-[10px]">{product.stock ?? 0}</Badge>}
     </div>
     <CardContent className="p-2 sm:p-3">
       <Badge variant="secondary" className="text-[10px] mb-1">{product.category || 'Sin categoría'}</Badge>
@@ -315,12 +315,13 @@ export default function HomePage() {
     });
   };
 
-  const updateQty = (productId: string, newQty: number) => {
-    if (newQty <= 0) { setCart(prev => prev.filter(item => item.id !== productId)); return; }
-    const product = products.find(p => p.id === productId);
-    if (newQty > product?.stock) { toast.error('Sin stock'); return; }
-    setCart(prev => prev.map(item => item.id === productId ? { ...item, qty: newQty } : item));
-  };
+  const updateQty = (productId: string, newQty: number) => { if (newQty <= 0) { setCart(prev => prev.filter(item => item.id !== productId)); return; }
+
+const product = products.find(p => p.id === productId);
+
+if (newQty > (product?.stock ?? 0)) { toast.error('Sin stock'); return; }
+
+setCart(prev => prev.map(item => item.id === productId ? { ...item, qty: newQty } : item)); };
 
   const removeFromCart = (productId: string) => setCart(prev => prev.filter(item => item.id !== productId));
 
