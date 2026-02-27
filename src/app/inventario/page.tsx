@@ -12,7 +12,7 @@ import { Package, Search, Plus, Trash2, Edit2, DollarSign, ShoppingCart, Tag, X,
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { collection, addDoc, updateDoc, deleteDoc, doc, query, where, onSnapshot, getDocs, getDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { storage } from '@/src/lib/firebase';
+//*import { storage } from '@/src/lib/firebase';
 import { auth, db } from '@/src/lib/firebase';
 import { toast } from 'sonner';
 import { BrowserMultiFormatReader } from '@zxing/library';
@@ -230,7 +230,7 @@ export default function InventarioPage() {
     toast.success('Código escaneado');
   };
 
-  const handleSave = async () => {
+const handleSave = async () => {
   const ownerId = getOwnerId() || user?.uid;
   if (!ownerId || !name || !price || !stock || !category) {
     toast.error('Completa todos los campos');
@@ -238,27 +238,6 @@ export default function InventarioPage() {
   }
   
   try {
-    let imageUrl = '';
-    
-    // Si hay una imagen nueva (base64), subirla a Storage
-    if (productImage && productImage.startsWith('data:')) {
-      try {
-        const response = await fetch(productImage);
-        const blob = await response.blob();
-        const fileName = `products/${ownerId}/${Date.now()}.jpg`;
-        const storageRef = ref(storage, fileName);
-        await uploadBytes(storageRef, blob);
-        imageUrl = await getDownloadURL(storageRef);
-      } catch (uploadError) {
-        console.error('Error uploading image:', uploadError);
-        toast.error('Error al subir imagen');
-        return;
-      }
-    } else {
-      // Si es una URL existente, usarla
-      imageUrl = productImage;
-    }
-
     const productData: any = {
       name,
       price: parseFloat(price),
@@ -267,7 +246,7 @@ export default function InventarioPage() {
       barcode: barcode || '',
       cost_price: parseFloat(costPrice) || 0,
       userId: ownerId,
-      image: imageUrl
+      image: productImage || '' // Guardar Base64 directamente
     };
 
     const variantsData: Record<string, string> = {};
