@@ -522,6 +522,7 @@ const handleSave = async () => {
           <Input 
             type="file"
             accept="image/*"
+            capture="environment"
             onChange={(e) => {
               const file = e.target.files?.[0];
               if (file) {
@@ -529,9 +530,13 @@ const handleSave = async () => {
                   toast.error('La imagen debe ser menor a 1MB');
                   return;
                 }
+                
                 const reader = new FileReader();
-                reader.onloadend = () => {
+                reader.onload = () => {
                   setProductImage(reader.result as string);
+                };
+                reader.onerror = () => {
+                  toast.error('Error al leer la imagen');
                 };
                 reader.readAsDataURL(file);
               }
