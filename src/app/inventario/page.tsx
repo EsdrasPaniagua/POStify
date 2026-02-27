@@ -521,9 +521,15 @@ const handleSave = async () => {
             onChange={(e) => {
               const file = e.target.files?.[0];
               if (file) {
+                // 检查文件大小 (最大 1MB)
+                if (file.size > 1000000) {
+                  toast.error('La imagen debe ser menor a 1MB');
+                  return;
+                }
+                
                 const reader = new FileReader();
                 reader.onloadend = () => {
-                  setProductImage(reader.result as string); // Vista previa
+                  setProductImage(reader.result as string);
                 };
                 reader.readAsDataURL(file);
               }
