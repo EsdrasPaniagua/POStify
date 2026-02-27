@@ -193,23 +193,24 @@ export default function InventarioPage() {
   const totalSaleValue = products.reduce((sum, p) => sum + p.price * p.stock, 0);
   const totalProducts = products.length;
   const lowStock = products.filter(p => p.stock < 10).length;
-
-  const resetForm = () => {
-    setName('');
-    setPrice('');
-    setStock('');
-    setCategory('');
-    setBarcode('');
-    setCostPrice('');
-    setProductImage('');
-    setEditingProduct(null);
-    setSelectedVariantOptions({});
-  };
+  
 
   const openNewDialog = () => {
-    resetForm();
-    setIsDialogOpen(true);
-  };
+  resetForm();
+  setIsDialogOpen(true);
+};
+
+const resetForm = () => {
+  setName('');
+  setPrice('');
+  setStock('');
+  setCategory('');
+  setBarcode('');
+  setCostPrice('');
+  setProductImage(''); // ← ESTA LÍNEA
+  setEditingProduct(null);
+  setSelectedVariantOptions({});
+};
 
   const openEditDialog = (product: Product) => {
   setEditingProduct(product);
@@ -505,7 +506,10 @@ const handleSave = async () => {
 </div>
 
 {/* Product Dialog */}
-<Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+<Dialog open={isDialogOpen} onOpenChange={(open) => {
+  setIsDialogOpen(open);
+  if (!open) resetForm();
+}}>
   <DialogContent className="max-w-md">
     <DialogHeader>
       <DialogTitle>{editingProduct ? 'Editar' : 'Nuevo'} Producto</DialogTitle>
@@ -513,38 +517,37 @@ const handleSave = async () => {
     <div className="space-y-4">
       {/* Imagen */}
       <div>
-      <Label>Imagen del producto</Label>
-      <div className="flex gap-2 items-center">
-        <Input 
-          type="file"
-          accept="image/*"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) {
-              // Verificar tamaño (máximo 1MB)
-              if (file.size > 1000000) {
-                toast.error('La imagen debe ser menor a 1MB');
-                return;
+        <Label>Imagen del producto</Label>
+        <div className="flex gap-2 items-center">
+          <Input 
+            type="file"
+            accept="image/*"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) {
+                if (file.size > 1000000) {
+                  toast.error('La imagen debe ser menor a 1MB');
+                  return;
+                }
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                  setProductImage(reader.result as string);
+                };
+                reader.readAsDataURL(file);
               }
-              
-              const reader = new FileReader();
-              reader.onloadend = () => {
-                setProductImage(reader.result as string);
-              };
-              reader.readAsDataURL(file);
-            }
-          }} 
-        />
-        {productImage && (
-          <img src={productImage} alt="Preview" className="w-10 h-10 object-cover rounded border" />
-        )}
+            }} 
+          />
+          {productImage && (
+            <img src={productImage} alt="Preview" className="w-10 h-10 object-cover rounded border" />
+          )}
+        </div>
       </div>
-    </div>
       
       <div>
         <Label>Nombre *</Label>
         <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nombre" />
       </div>
+      
       <div className="grid grid-cols-2 gap-4">
         <div>
           <Label>Precio *</Label>
@@ -555,19 +558,33 @@ const handleSave = async () => {
           <Input type="number" value={stock} onChange={(e) => setStock(e.target.value)} placeholder="0" />
         </div>
       </div>
+      
       <div className="grid grid-cols-2 gap-4">
         <div>
           <Label>Categoría *</Label>
-          <Input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Categoría" list="cats" />
-          <datalist id="cats">
-            {categories.filter(c => c !== 'Todos').map(c => <option key={c} value={c} />)}
-          </datalist>
+          {categories.length <= 1 ? (
+            <div className="p-2 border rounded bg-muted text-sm text-muted-foreground">
+              No hay categorías. Ve a "Categorías" para crear una.
+            </div>
+          ) : (
+            <select 
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <option value="">Selecciona una categoría</option>
+              {categories.filter(c => c !== 'Todos').map(c => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          )}
         </div>
         <div>
           <Label>Costo</Label>
           <Input type="number" value={costPrice} onChange={(e) => setCostPrice(e.target.value)} placeholder="0.00" />
         </div>
       </div>
+      
       <div>
         <Label>Código de Barras</Label>
         <div className="flex gap-2">
@@ -581,6 +598,7 @@ const handleSave = async () => {
           </Button>
         </div>
       </div>
+      
       {variants.length > 0 && (
         <div className="border-t pt-4 mt-4">
           <Label className="mb-2 block">Variantes</Label>
