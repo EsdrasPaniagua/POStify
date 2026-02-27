@@ -513,33 +513,33 @@ const handleSave = async () => {
     <div className="space-y-4">
       {/* Imagen */}
       <div>
-        <Label>Imagen del producto</Label>
-        <div className="flex gap-2 items-center">
-          <Input 
-            type="file"
-            accept="image/*"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) {
-                // 检查文件大小 (最大 1MB)
-                if (file.size > 1000000) {
-                  toast.error('La imagen debe ser menor a 1MB');
-                  return;
-                }
-                
-                const reader = new FileReader();
-                reader.onloadend = () => {
-                  setProductImage(reader.result as string);
-                };
-                reader.readAsDataURL(file);
+      <Label>Imagen del producto</Label>
+      <div className="flex gap-2 items-center">
+        <Input 
+          type="file"
+          accept="image/*"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) {
+              // Verificar tamaño (máximo 1MB)
+              if (file.size > 1000000) {
+                toast.error('La imagen debe ser menor a 1MB');
+                return;
               }
-            }} 
-          />
-          {productImage && (
-            <img src={productImage} alt="Preview" className="w-10 h-10 object-cover rounded border" />
-          )}
-        </div>
+              
+              const reader = new FileReader();
+              reader.onloadend = () => {
+                setProductImage(reader.result as string);
+              };
+              reader.readAsDataURL(file);
+            }
+          }} 
+        />
+        {productImage && (
+          <img src={productImage} alt="Preview" className="w-10 h-10 object-cover rounded border" />
+        )}
       </div>
+    </div>
       
       <div>
         <Label>Nombre *</Label>
