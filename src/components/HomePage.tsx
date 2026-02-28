@@ -45,120 +45,58 @@ interface BarcodeScannerProps {
   onScan: (code: string) => void;
 }
 
-const BarcodeScanner = ({ open, onClose, onScan }: BarcodeScannerProps) => {
+const BarcodeScanner = ({ open, onClose, onScan }: { open: boolean; onClose: () => void; onScan: (code: string) => void }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
-  const [error, setError] = useState<string>('');
-  const [isLoading, setIsLoading] = useState(true);
-  
 
   useEffect(() => {
     if (!open) return;
-    setError('');
-    setIsLoading(true);
+    if (!videoRef.current) return;
 
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setError('Tu navegador no soporta acceso a cámara');
-      setIsLoading(false);
-      return;
-    }
+    readerRef.current = new BrowserMultiFormatReader();
 
-    const initScanner = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        stream.getTracks().forEach(track => track.stop());
-
-        readerRef.current = new BrowserMultiFormatReader();
-        const devices = await readerRef.current.listVideoInputDevices();
-        
+    readerRef.current.listVideoInputDevices()
+      .then((devices) => {
         if (devices.length === 0) {
-          setError('No se encontró cámara');
-          setIsLoading(false);
+          toast.error('No se encontró cámara');
           return;
         }
-
-        const backCamera = devices.find((d: any) => 
-          d.label.toLowerCase().includes('back') || 
-          d.label.toLowerCase().includes('rear') ||
-          d.label.toLowerCase().includes('environment')
-        ) || devices[0];
-
-        readerRef.current.decodeFromVideoDevice(
-          backCamera.deviceId,
-          videoRef.current!,
-          (result, err) => {
-            if (result) {
-              onScan(result.getText());
-              handleClose();
-            }
+        const back = devices.find((d: any) => d.label.toLowerCase().includes('back')) || devices[0];
+        readerRef.current?.decodeFromVideoDevice(back.deviceId, videoRef.current!, (result) => {
+          if (result) {
+            onScan(result.getText());
+            onClose();
           }
-        );
-        
-        setIsLoading(false);
-      } catch (err: any) {
-        console.error('Error:', err);
-        setIsLoading(false);
-        if (err.name === 'NotAllowedError') {
-          setError('Permiso denegado. Permite la cámara.');
-        } else if (err.name === 'NotFoundError') {
-          setError('No se encontró cámara');
-        } else {
-          setError('Error al acceder a la cámara');
-        }
-      }
-    };
-
-    initScanner();
+        });
+      })
+      .catch((err) => {
+        console.error(err);
+        toast.error('Error al acceder a la cámara');
+      });
 
     return () => {
-      if (readerRef.current) {
-        try { readerRef.current.reset(); } catch (e) {}
-      }
+      readerRef.current?.reset();
     };
-  }, [open, onScan]);
-
-  const handleClose = () => {
-    if (readerRef.current) {
-      try { readerRef.current.reset(); } catch (e) {}
-    }
-    onClose();
-  };
+  }, [open, onScan, onClose]);
 
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-      <div className="bg-card rounded-2xl p-4 w-full max-w-md shadow-2xl">
+      <div className="bg-card rounded-2xl p-4 w-full max-w-sm shadow-2xl">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold flex items-center gap-2">
             <ScanLine className="h-5 w-5 text-primary" />
             Escanear Código
           </h3>
-          <Button variant="ghost" size="icon" onClick={handleClose}>X</Button>
+          <Button variant="ghost" size="icon" onClick={onClose}>X</Button>
         </div>
-        
-        {isLoading && (
-          <div className="text-center py-8">
-            <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4"></div>
-            <p className="text-muted-foreground">Iniciando cámara...</p>
-          </div>
-        )}
-        
-        {error && !isLoading ? (
-          <div className="text-center py-8">
-            <p className="text-red-500 font-medium">{error}</p>
-            <Button variant="outline" className="mt-4" onClick={handleClose}>Cerrar</Button>
-          </div>
-        ) : (
-          !isLoading && (
-            <div className="relative aspect-video bg-black rounded-xl overflow-hidden">
-              <video ref={videoRef} className="w-full h-full object-cover" />
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-56 h-32 border-2 border-primary/70 rounded-lg bg-primary/5" />
-              </div>
-            </div>
-          )
-        )}
+        <div className="relative aspect-video bg-black rounded-lg overflow-hidden">
+          <video ref={videoRef} className="w-full h-full object-cover" />
+        </div>
+        <p className="text-xs text-muted-foreground mt-2 text-center">
+          Apunta la cámara al código de barras
+        </p>
       </div>
     </div>
   );
@@ -177,6 +115,18 @@ const ProductCard = ({ product, onAdd }: { product: Product; onAdd: (product: Pr
     <CardContent className="p-2 sm:p-3">
       <Badge variant="secondary" className="text-[10px] mb-1">{product.category || 'Sin categoría'}</Badge>
       <h4 className="font-semibold text-xs sm:text-sm truncate leading-tight">{product.name}</h4>
+      
+      {/* Mostrar variantes */}
+      {product.variants && Object.keys(product.variants).length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-1">
+          {Object.entries(product.variants).map(([key, value]) => (
+            <span key={key} className="text-[10px] bg-muted px-1.5 py-0.5 rounded">
+              {value}
+            </span>
+          ))}
+        </div>
+      )}
+      
       <span className="text-base sm:text-xl font-bold text-primary block mt-1">{formatPrice(product.price)}</span>
     </CardContent>
   </Card>
@@ -452,9 +402,9 @@ return (
                 className="pl-9 h-11" 
               />
             </div>
-                        <Button variant="outline" onClick={() => setScannerOpen(true)} className="h-11">
-              <ScanLine className="h-4 w-4" />
-            </Button>
+              <Button variant="outline" onClick={() => setScannerOpen(true)} className="h-11">
+                <ScanLine className="h-4 w-4" />
+              </Button>
           </div>
         </div>
         
