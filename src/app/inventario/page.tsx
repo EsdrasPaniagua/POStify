@@ -458,7 +458,7 @@ const handleSave = async () => {
     </thead>
     <tbody>
       {filteredProducts.map((product) => (
-        <tr key={product.id} className={`border-b hover:bg-muted/30 ${product.stock < 10 ? 'bg-red-50' : ''}`}>
+        <tr key={product.id} className="border-b hover:bg-transparent">
           <td className="p-2">
             {product.image ? (
               <img src={product.image} alt={product.name} className="w-10 h-10 object-cover rounded" />
@@ -542,7 +542,11 @@ const handleSave = async () => {
             }} 
           />
           {productImage && (
-            <img src={productImage} alt="Preview" className="w-10 h-10 object-cover rounded border" />
+            <img 
+              src={productImage} 
+              alt="Preview" 
+              className="w-10 h-10 object-cover rounded border bg-muted" 
+            />
           )}
         </div>
       </div>
