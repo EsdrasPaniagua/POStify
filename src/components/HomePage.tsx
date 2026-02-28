@@ -188,6 +188,8 @@ const Cart = ({ items, onUpdateQty, onRemove, onCheckout, processing }: { items:
   );
 };
 
+
+
 export default function HomePage() {
   const [user, loading] = useAuthState(auth);
   const [mounted, setMounted] = useState(false);
@@ -198,8 +200,14 @@ export default function HomePage() {
   const [processing, setProcessing] = useState(false);
   const [categories, setCategories] = useState<string[]>(['Todos']);
   const [selectedCategory, setSelectedCategory] = useState('Todos');
+  const [selectedVariant, setSelectedVariant] = useState<{ id: string; value: string } | null>(null); // <-- AGREGAR ESTO
   const [cartExpanded, setCartExpanded] = useState(false);
   const [employeeData, setEmployeeData] = useState<any>(null);
+  // Agregar el estado de variants (buscá donde están los otros useState)
+const [variants, setVariants] = useState<any[]>([]);
+// Estado cambiado:
+const [selectedVariants, setSelectedVariants] = useState<{ id: string; value: string }[]>([]);
+
 
 
  useEffect(() => {
@@ -220,7 +228,7 @@ useEffect(() => {
     setCategories(['Todos']);
     setSelectedCategory('Todos');
   } else {
-    loadProducts(ownerId);
+    loadProducts(ownerId);  loadVariants();
   }
 }, [mounted, user, loading]);
 
@@ -298,11 +306,31 @@ useEffect(() => {
     }
   };
 
+  const loadVariants = async () => { // <-- AGREGAR ESTO
+  try {
+    const ownerId = getOwnerId() || user?.uid;
+    if (!ownerId) return;
+    const docRef = doc(db, 'settings', ownerId);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      setVariants(docSnap.data().variants || []);
+    }
+  } catch (error) { console.error('Error:', error); }
+};
+
   const filteredProducts = products.filter(p => {
-    const matchCat = selectedCategory === 'Todos' || p.category === selectedCategory;
-    const matchSearch = !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.barcode?.includes(search);
-    return matchCat && matchSearch;
-  });
+  const matchCat = selectedCategory === 'Todos' || p.category === selectedCategory;
+  
+  // Filtro por variantes múltiples
+  const matchVariants = selectedVariants.length === 0 || 
+    selectedVariants.every(v => p.variants?.[v.id] === v.value);
+  
+  const matchSearch = !search || 
+    p.name.toLowerCase().includes(search.toLowerCase()) || 
+    p.barcode?.includes(search);
+    
+  return matchCat && matchSearch && matchVariants;
+});
 
   const addToCart = (product: Product) => {
     setCart(prev => {
@@ -388,6 +416,19 @@ if (!ownerId) {
   );
 }
 
+const toggleVariant = (id: string, value: string) => {
+  setSelectedVariants(prev => {
+    const exists = prev.find(v => v.id === id && v.value === value);
+    if (exists) {
+      // Si ya existe, quitarlo
+      return prev.filter(v => !(v.id === id && v.value === value));
+    } else {
+      // Si no existe, agregarlo (primero quitar otras opciones de esa misma variante)
+      return [...prev.filter(v => v.id !== id), { id, value }];
+    }
+  });
+};
+
 return (
   <div className="flex flex-col lg:flex-row h-[calc(100vh-60px)]">
       <div className="flex-1 flex flex-col overflow-hidden">
@@ -422,6 +463,36 @@ return (
             ))}
           </div>
         </div>
+
+        {variants.filter(v => v.options.length > 0).length > 0 && (
+          <div className="border-b px-4 py-2">
+            <div className="flex gap-4 overflow-x-auto">
+              {variants.filter(v => v.options.length > 0).map((variant) => (
+                <div key={variant.id} className="flex items-center gap-2 shrink-0">
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">{variant.name}:</span>
+                  <select
+                    value={selectedVariants.find(v => v.id === variant.id)?.value || ''}
+                    onChange={(e) => {
+                      if (!e.target.value) {
+                        setSelectedVariants(prev => prev.filter(v => v.id !== variant.id));
+                      } else {
+                        toggleVariant(variant.id, e.target.value);
+                      }
+                    }}
+                    className="flex h-8 rounded-md border border-input bg-background px-2 py-1 text-xs min-w-[80px]"
+                  >
+                    <option value="">Todas</option>
+                    {variant.options.map((opt: any) => (
+                      <option key={opt.id} value={opt.name}>
+                        {opt.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         
         <div className="flex-1 overflow-y-auto p-4">
           {filteredProducts.length === 0 ? (
