@@ -43,6 +43,8 @@ interface Employee {
   };
 }
 
+
+
 const DEFAULT_VARIANTS: Variant[] = [
   { id: 'color', name: 'Color', options: [] },
   { id: 'size', name: 'Talle', options: [] },
@@ -79,6 +81,9 @@ export default function ConfiguracionPage() {
   const [employeeMonthlySalary, setEmployeeMonthlySalary] = useState('');
   const [employeePermissions, setEmployeePermissions] = useState(DEFAULT_PERMISSIONS);
   const [employeeActive, setEmployeeActive] = useState(true);
+  const [savedVariants, setSavedVariants] = useState(false);
+  const [savedStore, setSavedStore] = useState(false);
+  const [savedEmployee, setSavedEmployee] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -108,19 +113,27 @@ export default function ConfiguracionPage() {
     } catch (error) { console.error('Error:', error); }
   };
 
-  const saveSettings = async () => {
-    if (!user) return;
-    setSaving(true);
-    try {
-      await setDoc(doc(db, 'settings', user.uid), {
-        storeName,
-        variants,
-        userId: user.uid
-      }, { merge: true });
-      toast.success('Guardado');
-    } catch (error) { console.error('Error:', error); toast.error('Error'); }
-    finally { setSaving(false); }
-  };
+  // Save Settings
+const saveSettings = async () => {
+  const ownerId = getOwnerId() || user?.uid;
+  if (!ownerId) return;
+  setSaving(true);
+  try {
+    await setDoc(doc(db, 'settings', ownerId), {
+      storeName,
+      variants,
+      userId: ownerId
+    }, { merge: true });
+    toast.success('Guardado');
+    setSavedStore(true);
+    setSavedVariants(true);
+    setTimeout(() => {
+      setSavedStore(false);
+      setSavedVariants(false);
+    }, 2000);
+  } catch (error) { console.error('Error:', error); toast.error('Error'); }
+  finally { setSaving(false); }
+};
 
   // Variant functions
   const addVariant = () => {
@@ -140,17 +153,20 @@ export default function ConfiguracionPage() {
     setVariants(prev => prev.filter(v => v.id !== variantId));
   };
 
-  const addOption = (variantId: string) => {
-    if (!newOptionName.trim()) { toast.error('Escribe una opción'); return; }
-    setVariants(prev => prev.map(v => {
-      if (v.id === variantId) {
-        const newOption = { id: Date.now().toString(), name: newOptionName.trim() };
-        return { ...v, options: [...v.options, newOption] };
-      }
-      return v;
-    }));
-    setNewOptionName('');
-  };
+  // Después de addOption, guardar automáticamente
+const addOption = async (variantId: string) => {
+  if (!newOptionName.trim()) { toast.error('Escribe una opción'); return; }
+  setVariants(prev => prev.map(v => {
+    if (v.id === variantId) {
+      const newOption = { id: Date.now().toString(), name: newOptionName.trim() };
+      return { ...v, options: [...v.options, newOption] };
+    }
+    return v;
+  }));
+  setNewOptionName('');
+  // Guardar automáticamente
+  await saveSettings();
+};
 
   const deleteOption = (variantId: string, optionId: string) => {
     setVariants(prev => prev.map(v => {
@@ -210,7 +226,9 @@ export default function ConfiguracionPage() {
       toast.success('Empleado actualizado');
     } else {
       await addDoc(collection(db, 'employees'), employeeData);
-      toast.success('Empleado agregado');
+      toast.success('Empleado guardado');
+      setSavedEmployee(true);
+      setTimeout(() => setSavedEmployee(false), 2000);
     }
 
     setIsEmployeeDialogOpen(false);
@@ -258,7 +276,8 @@ export default function ConfiguracionPage() {
             <Input value={storeName} onChange={(e) => setStoreName(e.target.value)} placeholder="Mi Tienda" />
           </div>
           <Button onClick={saveSettings} disabled={saving}>
-            {saving ? 'Guardando...' : 'Guardar'}
+            {savedStore ? <Check className="h-4 w-4 mr-2" /> : <Store className="h-4 w-4 mr-2" />}
+            {saving ? 'Guardando...' : savedStore ? '¡Guardado!' : 'Guardar'}
           </Button>
         </CardContent>
       </Card>
@@ -366,7 +385,8 @@ export default function ConfiguracionPage() {
           </div>
 
           <Button onClick={saveSettings} disabled={saving} className="w-full">
-            {saving ? 'Guardando...' : 'Guardar Variantes'}
+            {savedVariants ? <Check className="h-4 w-4 mr-2" /> : null}
+            {saving ? 'Guardando...' : savedVariants ? '¡Variantes guardadas!' : 'Guardar Variantes'}
           </Button>
         </CardContent>
       </Card>
@@ -465,7 +485,8 @@ export default function ConfiguracionPage() {
                                   Cancelar
                                 </Button>
                                 <Button onClick={saveEmployee}>
-                                  Guardar
+                                  {savedEmployee ? <Check className="h-4 w-4 mr-2" /> : null}
+                                  {savedEmployee ? '¡Guardado!' : 'Guardar'}
                                 </Button>
                               </div>
                             </div>

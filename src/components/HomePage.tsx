@@ -437,16 +437,6 @@ if (!ownerId) {
   );
 }
 
-// Si no hay owner, no renderiza productos
-if (!ownerId) {
-  return (
-    <div className="p-6 flex flex-col items-center justify-center h-[60vh]">
-      <ShoppingCart className="h-20 w-20 text-muted-foreground/20 mb-4" />
-      <h2 className="text-xl font-semibold mb-2">Inicia sesión</h2>
-    </div>
-  );
-}
-
 return (
   <div className="flex flex-col lg:flex-row h-[calc(100vh-60px)]">
       <div className="flex-1 flex flex-col overflow-hidden">
