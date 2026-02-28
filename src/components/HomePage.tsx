@@ -375,6 +375,7 @@ useEffect(() => {
   const removeFromCart = (productId: string) => setCart(prev => prev.filter(item => item.id !== productId));
 
   const handleScan = (code: string) => {
+    setScannerOpen(true);
     const product = products.find(p => p.barcode === code);
     if (product) { addToCart(product); toast.success('Agregado'); }
     else { toast.error('No encontrado'); setSearch(code); }
