@@ -181,7 +181,7 @@ export default function InventarioPage() {
 
   const filteredProducts = products.filter(p => {
     const matchCat = selectedCategory === 'Todos' || 
-      (selectedCategory === 'BAJO STOCK' && p.stock < 10) ||
+      (selectedCategory === 'BAJO STOCK' && p.stock < 4) ||
       p.category === selectedCategory;
     const matchSearch = !search || 
       p.name.toLowerCase().includes(search.toLowerCase()) || 
@@ -193,7 +193,7 @@ export default function InventarioPage() {
   const totalStockValue = products.reduce((sum, p) => sum + (p.cost_price || 0) * p.stock, 0);
   const totalSaleValue = products.reduce((sum, p) => sum + p.price * p.stock, 0);
   const totalProducts = products.length;
-  const lowStock = products.filter(p => p.stock < 10).length;
+  const lowStock = products.filter(p => p.stock < 4).length;
   
 
   const openNewDialog = () => {
@@ -225,8 +225,6 @@ const resetForm = () => {
   setSelectedVariantOptions(product.variants || {});
   setIsDialogOpen(true);
 };
-
-
 
   const handleScan = (code: string) => {
     setBarcode(code);
@@ -499,7 +497,7 @@ const handleSave = async () => {
           <td className="p-2"><Badge variant="secondary" className="text-[10px]">{product.category}</Badge></td>
           <td className="p-2 text-muted-foreground text-[10px]">{product.barcode || '-'}</td>
           <td className="p-2 text-center">
-            <span className={`text-xs font-bold ${product.stock < 10 ? 'text-red-500' : ''}`}>{product.stock}</span>
+            <span className={`text-xs font-bold ${product.stock < 4 ? 'text-red-500' : ''}`}>{product.stock}</span>
           </td>
           <td className="p-2">
             <div className="flex justify-center gap-1">
