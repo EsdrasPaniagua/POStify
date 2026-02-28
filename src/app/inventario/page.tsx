@@ -118,6 +118,7 @@ export default function InventarioPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [scannerSearchOpen, setScannerSearchOpen] = useState(false); // <-- AGREGAR ESTO
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [newCategory, setNewCategory] = useState('');
   const [selectedVariantOptions, setSelectedVariantOptions] = useState<Record<string, string>>({});
@@ -225,11 +226,20 @@ const resetForm = () => {
   setIsDialogOpen(true);
 };
 
+
+
   const handleScan = (code: string) => {
     setBarcode(code);
     setScannerOpen(false);
     toast.success('Código escaneado');
   };
+
+  const handleScanSearch = (code: string) => {
+  setSearch(code);
+  setScannerSearchOpen(false);
+  toast.success('Código escaneado');
+};
+  
 
 const handleSave = async () => {
   const ownerId = getOwnerId() || user?.uid;
@@ -406,8 +416,16 @@ const handleSave = async () => {
               placeholder="Buscar..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
+              className="pl-9 pr-10"
             />
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8"
+              onClick={() => setScannerSearchOpen(true)}
+            >
+              <ScanLine className="h-4 w-4" />
+            </Button>
           </div>
           <div className="flex gap-2 overflow-x-auto pb-2">
             <Badge
@@ -677,7 +695,15 @@ const handleSave = async () => {
   </DialogContent>
 </Dialog>
 
-{/* Scanner Dialog */}
+{/* Scanner Dialog for Search */}
+{scannerSearchOpen && (
+  <ScannerDialog 
+    onScan={handleScanSearch} 
+    onClose={() => setScannerSearchOpen(false)} 
+  />
+)}
+
+{/* Scanner Dialog for Add Product */}
 {scannerOpen && (
   <ScannerDialog 
     onScan={handleScan} 
