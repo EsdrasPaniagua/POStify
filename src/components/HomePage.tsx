@@ -12,6 +12,7 @@ import { useAuthState } from 'react-firebase-hooks/auth';
 import { collection, getDocs, getDoc, doc, updateDoc, addDoc, query, where, increment, setDoc } from 'firebase/firestore';
 import { auth, db } from '@/src/lib/firebase';
 import { getOwnerId } from '@/src/lib/userId';
+import { UserAdsBanner } from "@/src/components/UserAdsBanner";
 
 interface Product {
   id: string;
