@@ -1,5 +1,6 @@
 "use client";
 
+import React from 'react';
 import { useState, useEffect, useRef } from 'react';
 import { getOwnerId } from '@/src/lib/userId';
 import { Card, CardContent } from '@/components/ui/card';
@@ -109,6 +110,7 @@ export default function InventarioPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [variants, setVariants] = useState<Variant[]>([]);
+
   const activeVariants = variants.filter(v => 
   v.options.length > 0 && 
   products.some(p => p.variants && p.variants[v.id])
@@ -130,6 +132,8 @@ export default function InventarioPage() {
   const [barcode, setBarcode] = useState('');
   const [costPrice, setCostPrice] = useState('');
   const [productImage, setProductImage] = useState('');
+
+  const [selectedVariants, setSelectedVariants] = useState<{ id: string; value: string }[]>([]);
 
   useEffect(() => {
   if (user) {
@@ -163,16 +167,14 @@ export default function InventarioPage() {
     } catch (error) { console.error('Error:', error); }
   };
 
-  const loadVariants = async () => {
-  if (!user) return;
+ const loadVariants = async () => {
   try {
     const ownerId = getOwnerId() || user?.uid;
     if (!ownerId) return;
     const docRef = doc(db, 'settings', ownerId);
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) {
-      const data = docSnap.data();
-      setVariants(data.variants || []);
+      setVariants(docSnap.data().variants || []);
     }
   } catch (error) { 
     console.error('Error:', error); 
@@ -180,15 +182,21 @@ export default function InventarioPage() {
 };
 
   const filteredProducts = products.filter(p => {
-    const matchCat = selectedCategory === 'Todos' || 
-      (selectedCategory === 'BAJO STOCK' && p.stock < 4) ||
-      p.category === selectedCategory;
-    const matchSearch = !search || 
-      p.name.toLowerCase().includes(search.toLowerCase()) || 
-      p.barcode?.includes(search) || 
-      p.category.toLowerCase().includes(search.toLowerCase());
-    return matchCat && matchSearch;
-  });
+  const matchCat = selectedCategory === 'Todos' || 
+    (selectedCategory === 'BAJO STOCK' && p.stock < 4) ||
+    p.category === selectedCategory;
+  
+  // Filtro por variantes
+  const matchVariants = selectedVariants.length === 0 || 
+    selectedVariants.every(v => p.variants?.[v.id] === v.value);
+  
+  const matchSearch = !search || 
+    p.name.toLowerCase().includes(search.toLowerCase()) || 
+    p.barcode?.includes(search) || 
+    p.category.toLowerCase().includes(search.toLowerCase());
+    
+  return matchCat && matchSearch && matchVariants;
+});
 
   const totalStockValue = products.reduce((sum, p) => sum + (p.cost_price || 0) * p.stock, 0);
   const totalSaleValue = products.reduce((sum, p) => sum + p.price * p.stock, 0);
@@ -351,6 +359,35 @@ const handleSave = async () => {
     return <div className="p-6"><h1>Cargando...</h1></div>;
   }
 
+const groupedProducts = filteredProducts.reduce((groups: any[], product) => {
+  // Agrupar por nombre + talle
+  const talle = product.variants?.size || product.variants?.Talle || product.variants?.talle || '';
+  const key = `${product.name}-${talle}`;
+  
+  const existingGroup = groups.find(g => g.key === key);
+  
+  if (existingGroup) {
+    existingGroup.products.push(product);
+  } else {
+    groups.push({
+      key,
+      name: product.name,
+      talle,
+      products: [product]
+    });
+  }
+  
+  return groups;
+}, []);
+
+// Ordenar grupos por talle numérico
+groupedProducts.sort((a, b) => {
+  const talleA = parseInt(a.talle) || 999;
+  const talleB = parseInt(b.talle) || 999;
+  return talleA - talleB;
+});
+
+
   return (
     <div className="p-4 sm:p-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
@@ -451,6 +488,33 @@ const handleSave = async () => {
               </Badge>
             ))}
           </div>
+          {variants.filter(v => v.options.length > 0).length > 0 && (
+  <div className="flex gap-4 overflow-x-auto pb-2 px-1">
+    {variants.filter(v => v.options.length > 0).map((variant) => (
+      <div key={variant.id} className="flex items-center gap-2 shrink-0">
+        <span className="text-xs text-muted-foreground whitespace-nowrap">{variant.name}:</span>
+        <select
+          value={selectedVariants.find(v => v.id === variant.id)?.value || ''}
+          onChange={(e) => {
+            if (!e.target.value) {
+              setSelectedVariants(prev => prev.filter(v => v.id !== variant.id));
+            } else {
+              setSelectedVariants(prev => [...prev.filter(v => v.id !== variant.id), { id: variant.id, value: e.target.value }]);
+            }
+          }}
+          className="flex h-8 rounded-md border border-input bg-background px-2 py-1 text-xs min-w-[80px]"
+        >
+          <option value="">Todas</option>
+          {variant.options.map((opt: any) => (
+            <option key={opt.id} value={opt.name}>
+              {opt.name}
+            </option>
+          ))}
+        </select>
+      </div>
+    ))}
+  </div>
+)}
         </CardContent>
       </Card>
 
@@ -472,53 +536,67 @@ const handleSave = async () => {
         <th className="text-center p-2 font-semibold text-xs">Acciones</th>
       </tr>
     </thead>
-    <tbody>
-      {filteredProducts.map((product) => (
-        <tr key={product.id} className="border-b hover:bg-transparent">
+<tbody>
+  {groupedProducts.map((group, groupIdx: number) => (
+    <React.Fragment key={group.key}>
+      {group.products.map((p: any, idx: number) => (
+        <tr 
+          key={p.id} 
+          className={`hover:bg-transparent ${idx === group.products.length - 1 ? 'border-b-4 border-muted' : ''}`}
+        >
           <td className="p-2">
-            {product.image ? (
-              <img src={product.image} alt={product.name} className="w-10 h-10 object-cover rounded" />
+            {p.image ? (
+              <img src={p.image} alt={p.name} className="w-10 h-10 object-cover rounded" />
             ) : (
               <Package className="h-6 w-6 text-muted-foreground/30" />
             )}
           </td>
           <td className="p-2">
-            <span className="font-medium text-xs">{product.name}</span>
+            {idx === 0 && <span className="font-medium text-xs">{group.name}</span>}
           </td>
-          {activeVariants.map((v) => (
-            <td key={v.id} className="p-2">
+          <td className="p-2">
+            <Badge variant="secondary" className="text-[10px]">
+              {p.variants?.color || p.variants?.Color || '-'}
+            </Badge>
+          </td>
+          <td className="p-2">
+            {idx === 0 && (
               <Badge variant="outline" className="text-[10px]">
-                {product.variants?.[v.id] || '-'}
+                {group.talle || '-'}
               </Badge>
-            </td>
-          ))}
-          <td className="p-2 text-right font-medium text-green-600 text-xs">{formatPrice(product.price)}</td>
-          <td className="p-2 text-right text-muted-foreground text-xs">{formatPrice(product.cost_price || 0)}</td>
-          <td className="p-2"><Badge variant="secondary" className="text-[10px]">{product.category}</Badge></td>
-          <td className="p-2 text-muted-foreground text-[10px]">{product.barcode || '-'}</td>
+            )}
+          </td>
+          <td className="p-2 text-right font-medium text-green-600 text-xs">{formatPrice(p.price)}</td>
+          <td className="p-2 text-right text-muted-foreground text-xs">{formatPrice(p.cost_price || 0)}</td>
+          <td className="p-2">
+            {idx === 0 && <Badge variant="secondary" className="text-[10px]">{p.category}</Badge>}
+          </td>
+          <td className="p-2 text-muted-foreground text-[10px]">{p.barcode || '-'}</td>
           <td className="p-2 text-center">
-            <span className={`text-xs font-bold ${product.stock < 4 ? 'text-red-500' : ''}`}>{product.stock}</span>
+            <span className={`text-xs font-bold ${p.stock < 4 ? 'text-red-500' : ''}`}>{p.stock}</span>
           </td>
           <td className="p-2">
             <div className="flex justify-center gap-1">
-              <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => openEditDialog(product)}>
+              <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => openEditDialog(p)}>
                 <Edit2 className="h-3 w-3" />
               </Button>
-              <Button variant="outline" size="icon" className="h-7 w-7 text-red-500" onClick={() => handleDelete(product.id)}>
+              <Button variant="outline" size="icon" className="h-7 w-7 text-red-500" onClick={() => handleDelete(p.id)}>
                 <Trash2 className="h-3 w-3" />
               </Button>
             </div>
           </td>
         </tr>
       ))}
-    </tbody>
+    </React.Fragment>
+  ))}
+</tbody>
   </table>
-  {filteredProducts.length === 0 && (
-    <div className="text-center py-12 text-muted-foreground">
-      <Package className="h-12 w-12 mx-auto mb-2 opacity-30" />
-      <p>No hay productos</p>
-    </div>
-  )}
+      {groupedProducts.length === 0 && (
+      <div className="text-center py-12 text-muted-foreground">
+        <Package className="h-12 w-12 mx-auto mb-2 opacity-30" />
+        <p>No hay productos</p>
+      </div>
+    )}
 </div>
 
 {/* Product Dialog */}
