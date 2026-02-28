@@ -403,44 +403,87 @@ groupedProducts.sort((a, b) => {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-6">
-        <Card>
-          <CardContent className="pt-4">
-            <div className="flex items-center gap-2 mb-1">
-              <Package className="h-4 w-4 text-muted-foreground" />
-              <span className="text-xs text-muted-foreground">Productos</span>
-            </div>
-            <p className="text-xl sm:text-2xl font-bold">{totalProducts}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4">
-            <div className="flex items-center gap-2 mb-1">
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
-              <span className="text-xs text-muted-foreground">Costo Stock</span>
-            </div>
-            <p className="text-lg sm:text-xl font-bold text-orange-600">{formatPrice(totalStockValue)}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4">
-            <div className="flex items-center gap-2 mb-1">
-              <ShoppingCart className="h-4 w-4 text-muted-foreground" />
-              <span className="text-xs text-muted-foreground">Valor Venta</span>
-            </div>
-            <p className="text-lg sm:text-xl font-bold text-green-600">{formatPrice(totalSaleValue)}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4">
-            <div className="flex items-center gap-2 mb-1">
-              <Package className="h-4 w-4 text-muted-foreground" />
-              <span className="text-xs text-muted-foreground">Bajo Stock</span>
-            </div>
-            <p className="text-xl sm:text-2xl font-bold text-red-500">{lowStock}</p>
-          </CardContent>
-        </Card>
+<div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-6">
+  
+  
+  {/* Total Valor compra */}
+  <Card>
+    <CardContent className="pt-4">
+      <div className="flex items-center gap-2 mb-1">
+        <DollarSign className="h-4 w-4 text-muted-foreground" />
+        <span className="text-xs text-muted-foreground">Costo Stock</span>
       </div>
+      <p className="text-lg sm:text-xl font-bold text-orange-600">{formatPrice(totalStockValue)}</p>
+    </CardContent>
+  </Card>
+  
+  {/* Total Valor Venta */}
+  <Card>
+
+    <CardContent className="pt-4">
+      <div className="flex items-center gap-2 mb-1">
+        <DollarSign className="h-4 w-4 text-muted-foreground" />
+        <span className="text-xs text-muted-foreground">Valor Venta</span>
+      </div>
+      <p className="text-lg sm:text-xl font-bold text-green-600">{formatPrice(totalSaleValue)}</p>
+    </CardContent>
+  </Card>
+
+  {/* Total Stock */}
+  <Card>
+    <CardContent className="pt-4">
+      <div className="flex items-center gap-2 mb-1">
+        <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+        <span className="text-xs text-muted-foreground">Total Stock</span>
+      </div>
+      <p className="text-xl sm:text-2xl font-bold">{products.reduce((sum, p) => sum + p.stock, 0)}</p>
+    </CardContent>
+  </Card>
+
+  {/* Stock Bajo */} 
+  <Card> 
+    <CardContent className="pt-4"> 
+      <div className="flex items-center gap-2 mb-1"> 
+        <Package className="h-4 w-4 text-red-500" /> 
+        <span className="text-xs text-muted-foreground">Stock Bajo</span> 
+        </div> 
+          <p className="text-xl sm:text-2xl font-bold text-red-500">{products.filter(p => p.stock < 4).length}</p> 
+          <p className="text-[10px] text-muted-foreground">productos</p> 
+    </CardContent> 
+  </Card>
+  
+  {/* Categorías con productos - ocupa 2 espacios */}
+  <Card className="col-span-2"> <CardContent className="pt-4"> <div className="flex items-center gap-2 mb-2"> <Tag className="h-4 w-4 text-muted-foreground" /> <span className="text-xs text-muted-foreground">Productos por Categoría</span> </div> <div className="space-y-1 max-h-24 overflow-y-auto"> {categories .filter(c => c !== 'Todos') .map(cat => { const count = products.filter(p => p.category === cat).length; return { cat, count }; }) .filter(item => item.count > 0) .sort((a, b) => b.count - a.count) .map(({ cat, count }) => ( <div key={cat} className="flex justify-between text-xs"> <span className="truncate">{cat}</span> <span className="font-bold">{count} {count === 1 ? 'producto' : 'productos'}</span> </div> )) } </div> </CardContent> </Card>
+
+  {/* Total de productos - ocupa 2 espacios */}
+  <Card className="col-span-2"> 
+    <CardContent className="pt-4"> 
+      <div className="flex items-center gap-2 mb-2"> 
+        <Tag className="h-4 w-4 text-muted-foreground" /> 
+        <span className="text-xs text-muted-foreground">Stock Por Producto</span> 
+        </div> 
+        <div className="space-y-1 max-h-24 overflow-y-auto"> 
+          {categories .filter(c => c !== 'Todos') 
+          .map(cat => { const stockSum = products.filter(p => p.category === cat)
+          .reduce((sum, p) => sum + p.stock, 0); return { cat, stockSum }; }) 
+          .filter(item => item.stockSum > 0) 
+          .map(({ cat, stockSum }) => (
+            <div key={cat} className="flex justify-between text-xs"> 
+              <span 
+                className="truncate">{cat}
+              </span> 
+              <span 
+                className="font-bold">{stockSum}
+                </span>
+            </div>
+          ))
+        } 
+      </div> 
+    </CardContent>
+  </Card>
+  
+</div>
+
 
       {/* Search & Filter */}
       <Card className="mb-4">
