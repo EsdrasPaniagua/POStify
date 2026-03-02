@@ -2,17 +2,16 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { BrowserMultiFormatReader } from '@zxing/library';
-import { Search, ScanLine, Package, ShoppingCart, Plus, Minus, Trash2 } from 'lucide-react';
+import { Search, ScanLine, Package, ShoppingCart, Plus, Minus, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { useAuthState } from 'react-firebase-hooks/auth';
-import { collection, getDocs, getDoc, doc, updateDoc, addDoc, query, where, increment, setDoc } from 'firebase/firestore';
+import { collection, getDocs, getDoc, doc, updateDoc, addDoc, query, where, increment, writeBatch } from 'firebase/firestore';
 import { auth, db } from '@/src/lib/firebase';
 import { getOwnerId } from '@/src/lib/userId';
-import { UserAdsBanner } from "@/src/components/UserAdsBanner";
 
 interface Product {
   id: string;
@@ -40,12 +39,6 @@ const formatPrice = (price: number) => {
   }).replace('ARS', '$');
 };
 
-interface BarcodeScannerProps {
-  open: boolean;
-  onClose: () => void;
-  onScan: (code: string) => void;
-}
-
 const BarcodeScanner = ({ open, onClose, onScan }: { open: boolean; onClose: () => void; onScan: (code: string) => void }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
@@ -53,31 +46,17 @@ const BarcodeScanner = ({ open, onClose, onScan }: { open: boolean; onClose: () 
   useEffect(() => {
     if (!open) return;
     if (!videoRef.current) return;
-
     readerRef.current = new BrowserMultiFormatReader();
-
     readerRef.current.listVideoInputDevices()
       .then((devices) => {
-        if (devices.length === 0) {
-          toast.error('No se encontró cámara');
-          return;
-        }
+        if (devices.length === 0) { toast.error('No se encontró cámara'); return; }
         const back = devices.find((d: any) => d.label.toLowerCase().includes('back')) || devices[0];
         readerRef.current?.decodeFromVideoDevice(back.deviceId, videoRef.current!, (result) => {
-          if (result) {
-            onScan(result.getText());
-            onClose();
-          }
+          if (result) { onScan(result.getText()); onClose(); }
         });
       })
-      .catch((err) => {
-        console.error(err);
-        toast.error('Error al acceder a la cámara');
-      });
-
-    return () => {
-      readerRef.current?.reset();
-    };
+      .catch(() => toast.error('Error al acceder a la cámara'));
+    return () => { readerRef.current?.reset(); };
   }, [open, onScan, onClose]);
 
   if (!open) return null;
@@ -90,106 +69,267 @@ const BarcodeScanner = ({ open, onClose, onScan }: { open: boolean; onClose: () 
             <ScanLine className="h-5 w-5 text-primary" />
             Escanear Código
           </h3>
-          <Button variant="ghost" size="icon" onClick={onClose}>X</Button>
+          <Button variant="ghost" size="icon" onClick={onClose}><X className="h-4 w-4" /></Button>
         </div>
         <div className="relative aspect-video bg-black rounded-lg overflow-hidden">
           <video ref={videoRef} className="w-full h-full object-cover" />
         </div>
-        <p className="text-xs text-muted-foreground mt-2 text-center">
-          Apunta la cámara al código de barras
-        </p>
+        <p className="text-xs text-muted-foreground mt-2 text-center">Apuntá la cámara al código de barras</p>
       </div>
     </div>
   );
 };
 
+const VariantDropdown = ({
+  variant,
+  selected,
+  onToggle,
+  onClear,
+}: {
+  variant: { id: string; name: string; options: { id: string; name: string }[] };
+  selected: { id: string; value: string }[];
+  onToggle: (id: string, value: string) => void;
+  onClear: () => void;
+}) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  const selectedCount = selected.length;
+  const label = selectedCount === 0
+    ? variant.name
+    : selectedCount === 1
+      ? `${variant.name}: ${selected[0].value}`
+      : `${variant.name}: ${selectedCount} selec.`;
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs border transition-colors whitespace-nowrap ${
+          selectedCount > 0
+            ? 'bg-primary text-primary-foreground border-primary'
+            : 'bg-background text-foreground border-input hover:bg-muted'
+        }`}
+      >
+        {label}
+        <svg className={`h-3 w-3 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-50 bg-card border rounded-xl shadow-xl min-w-[150px] overflow-hidden">
+          {selectedCount > 0 && (
+            <button
+              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:bg-muted border-b"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { onClear(); }}
+            >
+              <X className="h-3 w-3" /> Limpiar filtro
+            </button>
+          )}
+          {variant.options.map((opt) => {
+            const isSelected = selected.some(v => v.value === opt.name);
+            return (
+              <button
+                key={opt.id}
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-xs hover:bg-muted transition-colors text-left"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => onToggle(variant.id, opt.name)}
+              >
+                <span className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 transition-colors ${
+                  isSelected ? 'bg-primary border-primary' : 'border-input'
+                }`}>
+                  {isSelected && (
+                    <svg className="h-2.5 w-2.5 text-primary-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                </span>
+                {opt.name}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const ProductCard = ({ product, onAdd }: { product: Product; onAdd: (product: Product) => void }) => (
-  <Card className="cursor-pointer hover:shadow-lg hover:border-primary/30 transition-all duration-200 active:scale-95 overflow-hidden" onClick={() => onAdd(product)}>
+  <Card
+    className="cursor-pointer hover:shadow-lg hover:border-primary/30 transition-all duration-200 active:scale-95 overflow-hidden"
+    onClick={() => onAdd(product)}
+  >
     <div className="aspect-square bg-gradient-to-br from-muted/50 to-muted flex items-center justify-center relative min-h-[100px] sm:min-h-[120px]">
       {product.image ? (
         <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
       ) : (
         <Package className="h-10 w-10 sm:h-12 sm:w-12 text-muted-foreground/30" />
       )}
-      {(product.stock ?? 0) < 10 && <Badge className="absolute top-1.5 right-1.5 bg-red-500 text-white text-[10px]">{product.stock ?? 0}</Badge>}
+      {(product.stock ?? 0) < 10 && (
+        <Badge className="absolute top-1.5 right-1.5 bg-red-500 text-white text-[10px]">{product.stock ?? 0}</Badge>
+      )}
     </div>
     <CardContent className="p-2 sm:p-3">
       <Badge variant="secondary" className="text-[10px] mb-1">{product.category || 'Sin categoría'}</Badge>
       <h4 className="font-semibold text-xs sm:text-sm truncate leading-tight">{product.name}</h4>
-      
-      {/* Mostrar variantes */}
       {product.variants && Object.keys(product.variants).length > 0 && (
         <div className="flex flex-wrap gap-1 mt-1">
           {Object.entries(product.variants).map(([key, value]) => (
-            <span key={key} className="text-[10px] bg-muted px-1.5 py-0.5 rounded">
-              {value}
-            </span>
+            <span key={key} className="text-[10px] bg-muted px-1.5 py-0.5 rounded">{value}</span>
           ))}
         </div>
       )}
-      
       <span className="text-base sm:text-xl font-bold text-primary block mt-1">{formatPrice(product.price)}</span>
     </CardContent>
   </Card>
 );
 
-const Cart = ({ items, onUpdateQty, onRemove, onCheckout, processing }: { items: CartItem[]; onUpdateQty: (productId: string, newQty: number) => void; onRemove: (productId: string) => void; onCheckout: (paymentMethod: string) => void; processing: boolean }) => {
-  const subtotal = items.reduce((sum, item) => sum + (item.price * item.qty), 0);
+const PAYMENT_LABELS: Record<string, string> = {
+  cash: 'Efectivo',
+  card: 'Tarjeta',
+  transfer: 'Transferencia',
+};
 
-  if (items.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-2">
-        <ShoppingCart className="h-8 w-8 sm:h-12 sm:w-12 opacity-20 mb-2" />
-        <p className="text-xs sm:text-sm font-medium">Carrito vacío</p>
-        <p className="text-[10px] text-muted-foreground">Toca productos para agregar</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col h-full">
-      <div className="p-2 sm:p-3 border-b bg-muted/30 flex-shrink-0">
-        <div className="flex items-center justify-between">
-          <h3 className="font-bold text-sm">Carrito ({items.length})</h3>
-          <span className="text-sm font-bold text-primary">{formatPrice(subtotal)}</span>
+const ConfirmModal = ({
+  paymentMethod,
+  items,
+  subtotal,
+  onConfirm,
+  onCancel,
+  processing,
+}: {
+  paymentMethod: string;
+  items: CartItem[];
+  subtotal: number;
+  onConfirm: () => void;
+  onCancel: () => void;
+  processing: boolean;
+}) => (
+  <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-4">
+    <div className="bg-card rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+      <div className="bg-primary/10 px-5 py-4 border-b flex items-center justify-between">
+        <div>
+          <p className="text-xs text-muted-foreground">Método de pago</p>
+          <p className="font-bold text-lg">{PAYMENT_LABELS[paymentMethod]}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-xs text-muted-foreground">Total</p>
+          <p className="font-bold text-2xl text-primary">{formatPrice(subtotal)}</p>
         </div>
       </div>
-      
-      <div className="flex-1 overflow-y-auto p-1 sm:p-2 space-y-1">
-        {items.map((item) => (
-          <div key={item.id} className="flex items-center gap-1.5 p-1.5 bg-muted/50 rounded-lg text-xs">
-            <div className="flex-1 min-w-0">
-              <h4 className="font-medium truncate">{item.name}</h4>
-              <p className="text-muted-foreground text-[10px]">{formatPrice(item.price)}</p>
-            </div>
-            <div className="flex items-center gap-1">
-              <Button variant="outline" size="icon" className="h-5 w-5" onClick={() => onUpdateQty(item.id, item.qty - 1)}>
-                <Minus className="h-2 w-2" />
-              </Button>
-              <span className="w-4 text-center text-xs font-bold">{item.qty}</span>
-              <Button variant="outline" size="icon" className="h-5 w-5" onClick={() => onUpdateQty(item.id, item.qty + 1)}>
-                <Plus className="h-2 w-2" />
-              </Button>
-            </div>
-            <Button variant="ghost" size="icon" className="h-5 w-5 text-red-500" onClick={() => onRemove(item.id)}>
-              <Trash2 className="h-3 w-3" />
-            </Button>
+      <div className="px-5 py-3 max-h-48 overflow-y-auto space-y-1">
+        {items.map(item => (
+          <div key={item.id} className="flex justify-between text-sm">
+            <span className="text-muted-foreground truncate flex-1 mr-2">
+              {item.name} <span className="font-medium text-foreground">x{item.qty}</span>
+            </span>
+            <span className="font-medium flex-shrink-0">{formatPrice(item.price * item.qty)}</span>
           </div>
         ))}
       </div>
-      
-      <div className="p-2 sm:p-3 border-t flex-shrink-0">
-        <div className="grid grid-cols-3 gap-1">
-          <Button className="bg-green-600 hover:bg-green-700 text-[10px] h-7" onClick={() => onCheckout('cash')} disabled={processing}>Efectivo</Button>
-          <Button variant="outline" className="text-[10px] h-7" onClick={() => onCheckout('card')} disabled={processing}>Tarjeta</Button>
-          <Button variant="outline" className="text-[10px] h-7" onClick={() => onCheckout('transfer')} disabled={processing}>Transfer</Button>
-        </div>
+      <div className="px-5 py-4 border-t flex gap-2">
+        <Button variant="outline" className="flex-1 h-11" onClick={onCancel} disabled={processing}>
+          Cancelar
+        </Button>
+        <Button className="flex-1 h-11 bg-green-600 hover:bg-green-700" onClick={onConfirm} disabled={processing}>
+          {processing ? 'Procesando...' : 'Confirmar'}
+        </Button>
       </div>
     </div>
+  </div>
+);
+
+const Cart = ({
+  items, onUpdateQty, onRemove, onCheckout, processing, onClose
+}: {
+  items: CartItem[];
+  onUpdateQty: (productId: string, newQty: number) => void;
+  onRemove: (productId: string) => void;
+  onCheckout: (paymentMethod: string) => void;
+  processing: boolean;
+  onClose: () => void;
+}) => {
+  const [pendingPayment, setPendingPayment] = useState<string | null>(null);
+  const subtotal = items.reduce((sum, item) => sum + (item.price * item.qty), 0);
+
+  const handleConfirm = () => {
+    if (pendingPayment) {
+      onCheckout(pendingPayment);
+      setPendingPayment(null);
+    }
+  };
+
+  return (
+    <>
+      <div className="flex flex-col h-full">
+        <div className="p-3 border-b bg-muted/30 flex-shrink-0 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ShoppingCart className="h-4 w-4 text-primary" />
+            <h3 className="font-bold text-sm">Carrito ({items.reduce((s, i) => s + i.qty, 0)})</h3>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-bold text-primary">{formatPrice(subtotal)}</span>
+            <Button variant="ghost" size="icon" className="h-7 w-7 lg:hidden" onClick={onClose}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          {items.map((item) => (
+            <div key={item.id} className="flex items-center gap-1.5 p-1.5 bg-muted/50 rounded-lg text-xs">
+              <div className="flex-1 min-w-0">
+                <h4 className="font-medium truncate">{item.name}</h4>
+                <p className="text-muted-foreground text-[10px]">{formatPrice(item.price)}</p>
+              </div>
+              <div className="flex items-center gap-1">
+                <Button variant="outline" size="icon" className="h-5 w-5" onClick={() => onUpdateQty(item.id, item.qty - 1)}>
+                  <Minus className="h-2 w-2" />
+                </Button>
+                <span className="w-4 text-center text-xs font-bold">{item.qty}</span>
+                <Button variant="outline" size="icon" className="h-5 w-5" onClick={() => onUpdateQty(item.id, item.qty + 1)}>
+                  <Plus className="h-2 w-2" />
+                </Button>
+              </div>
+              <Button variant="ghost" size="icon" className="h-5 w-5 text-red-500" onClick={() => onRemove(item.id)}>
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            </div>
+          ))}
+        </div>
+
+        <div className="p-2 sm:p-3 border-t flex-shrink-0">
+          <div className="grid grid-cols-3 gap-1">
+            <Button className="bg-green-600 hover:bg-green-700 text-[10px] h-8" onClick={() => setPendingPayment('cash')} disabled={processing}>Efectivo</Button>
+            <Button variant="outline" className="text-[10px] h-8" onClick={() => setPendingPayment('card')} disabled={processing}>Tarjeta</Button>
+            <Button variant="outline" className="text-[10px] h-8" onClick={() => setPendingPayment('transfer')} disabled={processing}>Transfer</Button>
+          </div>
+        </div>
+      </div>
+
+      {pendingPayment && (
+        <ConfirmModal
+          paymentMethod={pendingPayment}
+          items={items}
+          subtotal={subtotal}
+          onConfirm={handleConfirm}
+          onCancel={() => setPendingPayment(null)}
+          processing={processing}
+        />
+      )}
+    </>
   );
 };
-
-
 
 export default function HomePage() {
   const [user, loading] = useAuthState(auth);
@@ -197,101 +337,47 @@ export default function HomePage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [search, setSearch] = useState('');
+  const [showDropdown, setShowDropdown] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [processing, setProcessing] = useState(false);
-  const [categories, setCategories] = useState<string[]>(['Todos']);
-  const [selectedCategory, setSelectedCategory] = useState('Todos');
-  const [selectedVariant, setSelectedVariant] = useState<{ id: string; value: string } | null>(null); // <-- AGREGAR ESTO
-  const [cartExpanded, setCartExpanded] = useState(false);
+  const [variants, setVariants] = useState<any[]>([]);
+  const [selectedVariants, setSelectedVariants] = useState<{ id: string; value: string }[]>([]);
   const [employeeData, setEmployeeData] = useState<any>(null);
-  // Agregar el estado de variants (buscá donde están los otros useState)
-const [variants, setVariants] = useState<any[]>([]);
-// Estado cambiado:
-const [selectedVariants, setSelectedVariants] = useState<{ id: string; value: string }[]>([]);
+  const [cartOpen, setCartOpen] = useState(false);
 
+  const searchRef = useRef<HTMLInputElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    if (cart.length > 0) setCartOpen(true);
+  }, [cart.length]);
 
- useEffect(() => {
-  if (cart.length > 0) setCartExpanded(true);
-  else setCartExpanded(false);
-}, [cart.length]);
+  useEffect(() => { setMounted(true); }, []);
 
-useEffect(() => { setMounted(true); }, []);
+  useEffect(() => {
+    const stored = localStorage.getItem('employeeData');
+    if (stored) setEmployeeData(JSON.parse(stored));
+  }, []);
 
-useEffect(() => {
-  if (!mounted) return;
-  
-  const ownerId = getOwnerId() || user?.uid;
-  
-  if (!ownerId) {
-    setProducts([]);
-    setCart([]);
-    setCategories(['Todos']);
-    setSelectedCategory('Todos');
-  } else {
-    loadProducts(ownerId);  loadVariants();
-  }
-}, [mounted, user, loading]);
-
-useEffect(() => {
-  if (!mounted) return;
-  
-  const ownerId = getOwnerId();
-  if (ownerId) {
-    loadProducts(ownerId);
-  }
-}, [mounted, user, loading]); // <-- AGREGAR 'loading'
-
-
-useEffect(() => {
-  const stored = localStorage.getItem('employeeData');
-  if (stored) {
-    setEmployeeData(JSON.parse(stored));
-  }
-}, []);
-
-
-const [isOwner, setIsOwner] = useState(false);
-
-useEffect(() => {
-  const checkIfOwner = async () => {
-    if (!user) return;
-    
-    try {
-      // Verificar si es owner
-      const ownerDoc = await getDoc(doc(db, 'owners', user.uid));
-      
-      if (ownerDoc.exists()) {
-        setIsOwner(true);
-      } else {
-        // Si no es owner, verificar si es empleado
-        const empQuery = query(
-          collection(db, 'employees'), 
-          where('userId', '==', user.uid)
-        );
-        const empSnap = await getDocs(empQuery);
-        
-        if (empSnap.empty) {
-          // No es owner ni empleado - crear como owner automáticamente
-          await setDoc(doc(db, 'owners', user.uid), {
-            email: user.email,
-            name: user.displayName || 'Dueño',
-            createdAt: new Date().toISOString()
-          });
-          setIsOwner(true);
-        } else {
-          setIsOwner(false);
-        }
-      }
-    } catch (error) {
-      console.error('Error:', error);
+  useEffect(() => {
+    if (!mounted) return;
+    const ownerId = getOwnerId() || user?.uid;
+    if (ownerId) {
+      loadProducts(ownerId);
+      loadVariants(ownerId);
     }
-  };
-  
-  checkIfOwner();
-}, [user]);
+  }, [mounted, user, loading]);
 
-
+  // Cerrar dropdown al hacer click afuera
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const loadProducts = async (ownerId: string) => {
     try {
@@ -299,39 +385,52 @@ useEffect(() => {
       const snapshot = await getDocs(q);
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
       setProducts(data);
-      setCategories(['Todos', ...new Set(data.map(p => p.category))]);
-    } catch (error) { 
-      console.error('Error:', error); 
+    } catch (error) {
+      console.error('Error:', error);
       setProducts([]);
-      setCart([]);
     }
   };
 
-  const loadVariants = async () => { // <-- AGREGAR ESTO
-  try {
-    const ownerId = getOwnerId() || user?.uid;
-    if (!ownerId) return;
-    const docRef = doc(db, 'settings', ownerId);
-    const docSnap = await getDoc(docRef);
-    if (docSnap.exists()) {
-      setVariants(docSnap.data().variants || []);
-    }
-  } catch (error) { console.error('Error:', error); }
-};
+  const loadVariants = async (ownerId: string) => {
+    try {
+      const docRef = doc(db, 'settings', ownerId);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) setVariants(docSnap.data().variants || []);
+    } catch (error) { console.error('Error:', error); }
+  };
 
-  const filteredProducts = products.filter(p => {
-  const matchCat = selectedCategory === 'Todos' || p.category === selectedCategory;
-  
-  // Filtro por variantes múltiples
-  const matchVariants = selectedVariants.length === 0 || 
-    selectedVariants.every(v => p.variants?.[v.id] === v.value);
-  
-  const matchSearch = !search || 
-    p.name.toLowerCase().includes(search.toLowerCase()) || 
-    p.barcode?.includes(search);
-    
-  return matchCat && matchSearch && matchVariants;
-});
+  // Sugerencias únicas por nombre para el dropdown
+  const dropdownSuggestions = search.trim().length > 0
+    ? Array.from(
+        new Map(
+          products
+            .filter(p =>
+              p.name.toLowerCase().includes(search.toLowerCase()) ||
+              p.barcode?.includes(search)
+            )
+            .map(p => [p.name.toLowerCase(), p])
+        ).values()
+      ).slice(0, 8)
+    : [];
+
+  const hasActiveSearch = search.trim().length > 0 || selectedVariants.length > 0;
+
+  const filteredProducts = hasActiveSearch ? products.filter(p => {
+    // Agrupar por variante: dentro de una misma variante se usa OR, entre variantes AND
+    const variantGroups = selectedVariants.reduce((acc, v) => {
+      if (!acc[v.id]) acc[v.id] = [];
+      acc[v.id].push(v.value);
+      return acc;
+    }, {} as Record<string, string[]>);
+    const matchVariants = selectedVariants.length === 0 ||
+      Object.entries(variantGroups).every(([id, values]) =>
+        values.some(val => p.variants?.[id] === val)
+      );
+    const matchSearch = !search.trim() ||
+      p.name.toLowerCase().includes(search.toLowerCase()) ||
+      p.barcode?.includes(search);
+    return matchSearch && matchVariants;
+  }) : [];
 
   const addToCart = (product: Product) => {
     setCart(prev => {
@@ -342,6 +441,13 @@ useEffect(() => {
       }
       return [...prev, { ...product, qty: 1 }];
     });
+    toast.success(`${product.name} agregado`);
+  };
+
+  const handleSelectSuggestion = (name: string) => {
+    setSearch(name);
+    setShowDropdown(false);
+    searchRef.current?.focus();
   };
 
   const updateQty = (productId: string, newQty: number) => {
@@ -351,158 +457,205 @@ useEffect(() => {
     setCart(prev => prev.map(item => item.id === productId ? { ...item, qty: newQty } : item));
   };
 
-  const removeFromCart = (productId: string) => setCart(prev => prev.filter(item => item.id !== productId));
+  const removeFromCart = (productId: string) => {
+    setCart(prev => {
+      const newCart = prev.filter(item => item.id !== productId);
+      if (newCart.length === 0) setCartOpen(false);
+      return newCart;
+    });
+  };
 
   const handleScan = (code: string) => {
-    setScannerOpen(true);
     const product = products.find(p => p.barcode === code);
-    if (product) { addToCart(product); toast.success('Agregado'); }
-    else { toast.error('No encontrado'); setSearch(code); }
+    if (product) {
+      addToCart(product);
+      setSearch('');
+    } else {
+      toast.error('Producto no encontrado');
+      setSearch(code);
+    }
   };
 
   const handleCheckout = async (paymentMethod: string) => {
-  const ownerId = getOwnerId() || user?.uid;
-  if (!ownerId) { toast.error('Inicia sesión'); return; }
-  if (cart.length === 0) { toast.error('Carrito vacío'); return; }
-  setProcessing(true);
-  try {
-    const total = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
-    
-    // Si es el dueño (no hay employeeData), se lleva el 100%
-    const isOwner = !employeeData?.id;
+    const ownerId = getOwnerId() || user?.uid;
+    if (!ownerId) { toast.error('Inicia sesión'); return; }
+    if (cart.length === 0) { toast.error('Carrito vacío'); return; }
+    setProcessing(true);
+    try {
+      const total = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
+      const isOwnerSale = !employeeData?.id;
+      const employeeCommissionPercent = isOwnerSale ? 100 : (employeeData?.commissionPercent || 10);
 
-    // Si es owner, 100% de comisión
-    const employeeCommissionPercent = isOwner ? 100 : (employeeData?.commissionPercent || 10);
+      const saleData = {
+        userId: ownerId,
+        total,
+        items: cart.reduce((sum, item) => sum + item.qty, 0),
+        paymentMethod,
+        products: cart.map(item => item.name + ' x' + item.qty).join(', '),
+        productsList: cart.map(item => ({
+          name: item.name,
+          qty: item.qty,
+          price: item.price,
+          costPrice: item.cost_price || 0,
+          category: item.category
+        })),
+        createdAt: new Date().toISOString(),
+        employeeId: isOwnerSale ? 'owner' : (employeeData?.id || null),
+        employeeName: isOwnerSale ? 'DUEÑO' : (employeeData?.name || null),
+        employeeCommissionPercent
+      };
 
-    const saleData = {
-      userId: ownerId,
-      total,
-      items: cart.reduce((sum, item) => sum + item.qty, 0),
-      paymentMethod,
-      products: cart.map(item => item.name + ' x' + item.qty).join(', '),
-      productsList: cart.map(item => ({ 
-        name: item.name, 
-        qty: item.qty, 
-        price: item.price,
-        costPrice: item.cost_price || 0,
-        category: item.category 
-      })),
-      createdAt: new Date().toISOString(),
-      employeeId: isOwner ? 'owner' : (employeeData?.id || null),
-      employeeName: isOwner ? 'DUEÑO' : (employeeData?.name || null),
-      employeeCommissionPercent: employeeCommissionPercent
-    };
-
-    await addDoc(collection(db, 'sales'), saleData);
-    for (const item of cart) {
-      await updateDoc(doc(db, 'products', item.id), { stock: increment(-item.qty) });
+      const batch = writeBatch(db);
+      const saleRef = doc(collection(db, 'sales'));
+      batch.set(saleRef, saleData);
+      for (const item of cart) {
+        batch.update(doc(db, 'products', item.id), { stock: increment(-item.qty) });
+      }
+      await batch.commit();
+      toast.success('Venta: ' + formatPrice(total));
+      setCart([]);
+      setCartOpen(false);
+      setSearch('');
+      loadProducts(ownerId);
+    } catch (error) {
+      console.error('Error:', error);
+      toast.error('Error al procesar la venta');
+    } finally {
+      setProcessing(false);
     }
-    toast.success('Venta: ' + formatPrice(total));
-    setCart([]);
-    loadProducts(ownerId);
-  } catch (error) { console.error('Error:', error); toast.error('Error'); }
-  finally { setProcessing(false); }
-};
+  };
+
+  const toggleVariant = (id: string, value: string) => {
+    setSelectedVariants(prev => {
+      const exists = prev.find(v => v.id === id && v.value === value);
+      // Si ya existe, lo quita; si no existe, lo agrega SIN eliminar otras opciones de la misma variante
+      if (exists) return prev.filter(v => !(v.id === id && v.value === value));
+      return [...prev, { id, value }];
+    });
+  };
 
   if (!mounted || loading) return <div className="p-6"><h1>Cargando...</h1></div>;
 
-const ownerId = getOwnerId() || user?.uid;
+  const ownerId = getOwnerId() || user?.uid;
+  if (!ownerId) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[80vh] gap-4">
+        <ShoppingCart className="h-20 w-20 text-muted-foreground/20" />
+        <h2 className="text-xl font-semibold">Inicia sesión para continuar</h2>
+      </div>
+    );
+  }
 
-if (!ownerId) {
   return (
-    <div className="p-6 flex flex-col items-center justify-center h-[60vh]">
-      <ShoppingCart className="h-20 w-20 text-muted-foreground/20 mb-4" />
-      <h2 className="text-xl font-semibold mb-2">Inicia sesión</h2>
-    </div>
-  );
-}
+    <div className="flex h-[calc(100vh-60px)]">
 
-const toggleVariant = (id: string, value: string) => {
-  setSelectedVariants(prev => {
-    const exists = prev.find(v => v.id === id && v.value === value);
-    if (exists) {
-      // Si ya existe, quitarlo
-      return prev.filter(v => !(v.id === id && v.value === value));
-    } else {
-      // Si no existe, agregarlo (primero quitar otras opciones de esa misma variante)
-      return [...prev.filter(v => v.id !== id), { id, value }];
-    }
-  });
-};
-
-return (
-  <div className="flex flex-col lg:flex-row h-[calc(100vh-60px)]">
+      {/* ÁREA PRINCIPAL */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="p-4 border-b bg-card/50">
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input 
-                placeholder="Buscar..." 
-                value={search} 
-                onChange={(e) => setSearch(e.target.value)} 
-                className="pl-9 h-11" 
-              />
+
+        {/* BARRA DE BÚSQUEDA */}
+        <div className={`transition-all duration-300 flex flex-col items-center justify-center px-4 ${hasActiveSearch ? 'py-3' : 'py-16'}`}>
+
+          {!hasActiveSearch && (
+            <div className="text-center mb-6">
+              <ShoppingCart className="h-12 w-12 text-primary/30 mx-auto mb-2" />
+              <h2 className="text-xl font-semibold">¿Qué buscás?</h2>
+              <p className="text-sm text-muted-foreground">Buscá un producto o escaneá el código</p>
             </div>
-              <Button variant="outline" onClick={() => setScannerOpen(true)} className="h-11">
+          )}
+
+          {/* Wrapper con ref para detectar clicks afuera */}
+          <div ref={wrapperRef} className="relative w-full max-w-xl">
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  ref={searchRef}
+                  placeholder="Buscar producto..."
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setShowDropdown(true);
+                  }}
+                  onFocus={() => { if (search.trim()) setShowDropdown(true); }}
+                  className="pl-9 h-11"
+                  autoFocus
+                  autoComplete="off"
+                />
+                {search && (
+                  <button
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => { setSearch(''); setShowDropdown(false); searchRef.current?.focus(); }}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+              <Button variant="outline" onClick={() => setScannerOpen(true)} className="h-11 px-4">
                 <ScanLine className="h-4 w-4" />
               </Button>
+            </div>
+
+            {/* DROPDOWN */}
+            {showDropdown && dropdownSuggestions.length > 0 && (
+              <div className="absolute left-0 right-12 top-full mt-1 z-50 bg-card border rounded-xl shadow-xl overflow-hidden">
+                {dropdownSuggestions.map((product) => (
+                  <button
+                    key={product.id}
+                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted transition-colors text-left"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleSelectSuggestion(product.name)}
+                  >
+                    {/* Miniatura */}
+                    <div className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center flex-shrink-0 overflow-hidden">
+                      {product.image
+                        ? <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+                        : <Package className="h-4 w-4 text-muted-foreground/40" />
+                      }
+                    </div>
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{product.name}</p>
+                      <p className="text-xs text-muted-foreground">{product.category}</p>
+                    </div>
+                    {/* Precio */}
+                    <span className="text-sm font-bold text-primary flex-shrink-0">{formatPrice(product.price)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-        </div>
-        
-        <div className="border-b overflow-x-auto">
-          <div className="flex gap-2 px-4 py-2">
-            {categories.map((cat) => (
-              <Badge 
-                key={cat} 
-                variant={selectedCategory === cat ? 'default' : 'secondary'} 
-                className="cursor-pointer" 
-                onClick={() => setSelectedCategory(cat)}
-              >
-                {cat}
-              </Badge>
-            ))}
-          </div>
+
+          {/* Filtros de variantes */}
+          {hasActiveSearch && variants.filter(v => v.options.length > 0).length > 0 && (
+            <div className="flex gap-2 flex-wrap w-full max-w-xl mt-2">
+              {variants.filter(v => v.options.length > 0).map((variant) => {
+                const selected = selectedVariants.filter(v => v.id === variant.id);
+                return (
+                  <VariantDropdown
+                    key={variant.id}
+                    variant={variant}
+                    selected={selected}
+                    onToggle={toggleVariant}
+                    onClear={() => setSelectedVariants(prev => prev.filter(v => v.id !== variant.id))}
+                  />
+                );
+              })}
+            </div>
+          )}
         </div>
 
-        {variants.filter(v => v.options.length > 0).length > 0 && (
-          <div className="border-b px-4 py-2">
-            <div className="flex gap-4 overflow-x-auto">
-              {variants.filter(v => v.options.length > 0).map((variant) => (
-                <div key={variant.id} className="flex items-center gap-2 shrink-0">
-                  <span className="text-xs text-muted-foreground whitespace-nowrap">{variant.name}:</span>
-                  <select
-                    value={selectedVariants.find(v => v.id === variant.id)?.value || ''}
-                    onChange={(e) => {
-                      if (!e.target.value) {
-                        setSelectedVariants(prev => prev.filter(v => v.id !== variant.id));
-                      } else {
-                        toggleVariant(variant.id, e.target.value);
-                      }
-                    }}
-                    className="flex h-8 rounded-md border border-input bg-background px-2 py-1 text-xs min-w-[80px]"
-                  >
-                    <option value="">Todas</option>
-                    {variant.options.map((opt: any) => (
-                      <option key={opt.id} value={opt.name}>
-                        {opt.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ))}
+        {/* RESULTADOS */}
+        <div className="flex-1 overflow-y-auto px-4 pb-4">
+          {hasActiveSearch && filteredProducts.length === 0 && (
+            <div className="flex flex-col items-center justify-center h-40 text-muted-foreground">
+              <Package className="h-10 w-10 opacity-20 mb-2" />
+              <p className="text-sm">No se encontraron productos</p>
             </div>
-          </div>
-        )}
-        
-        <div className="flex-1 overflow-y-auto p-4">
-          {filteredProducts.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-              <Package className="h-16 w-16 opacity-20 mb-4" />
-              <p>No hay productos</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
+          )}
+
+          {filteredProducts.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3">
               {filteredProducts.map((product) => (
                 <ProductCard key={product.id} product={product} onAdd={addToCart} />
               ))}
@@ -510,22 +663,36 @@ return (
           )}
         </div>
       </div>
-      
-      <div className={`lg:w-96 h-[20vh] sm:h-[20vh] ${cartExpanded ? 'sm:h-[40vh]' : ''} lg:h-full border-t lg:border-t-0 lg:border-l bg-card transition-all duration-300`}>
-        <Cart 
-          items={cart} 
-          onUpdateQty={updateQty} 
-          onRemove={removeFromCart} 
-          onCheckout={handleCheckout} 
-          processing={processing} 
-        />
-      </div>
-      
-      <BarcodeScanner 
-        open={scannerOpen} 
-        onClose={() => setScannerOpen(false)} 
-        onScan={handleScan} 
-      />    
+
+      {/* CARRITO */}
+      {cartOpen && cart.length > 0 && (
+        <>
+          <div className="lg:hidden fixed inset-0 bg-black/40 z-30" onClick={() => setCartOpen(false)} />
+          <div className="fixed lg:static right-0 top-0 bottom-0 z-40 w-80 lg:w-96 bg-card border-l shadow-2xl lg:shadow-none flex flex-col">
+            <Cart
+              items={cart}
+              onUpdateQty={updateQty}
+              onRemove={removeFromCart}
+              onCheckout={handleCheckout}
+              processing={processing}
+              onClose={() => setCartOpen(false)}
+            />
+          </div>
+        </>
+      )}
+
+      {/* Botón flotante carrito mobile */}
+      {cart.length > 0 && !cartOpen && (
+        <button
+          className="lg:hidden fixed bottom-20 right-4 z-40 bg-primary text-primary-foreground rounded-full p-4 shadow-lg flex items-center gap-2"
+          onClick={() => setCartOpen(true)}
+        >
+          <ShoppingCart className="h-5 w-5" />
+          <span className="font-bold text-sm">{cart.reduce((s, i) => s + i.qty, 0)}</span>
+        </button>
+      )}
+
+      <BarcodeScanner open={scannerOpen} onClose={() => setScannerOpen(false)} onScan={handleScan} />
     </div>
   );
 }

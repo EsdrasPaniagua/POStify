@@ -1,7 +1,7 @@
 "use client";
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { LayoutDashboard, Package, ShoppingCart, Settings, Store, Menu, X, LogIn, LogOut, Users, Sun, Moon } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,16 @@ import { collection, query, where, getDocs, doc, setDoc } from 'firebase/firesto
 import { toast } from 'sonner';
 import { useTheme } from "next-themes";
 
+interface Permissions {
+  viewSales: boolean;
+  editProducts: boolean;
+  deleteProducts: boolean;
+  viewDashboard: boolean;
+  manageCategories: boolean;
+  manageEmployees: boolean;
+  settings: boolean;
+}
+
 interface Employee {
   id: string;
   name: string;
@@ -21,34 +31,26 @@ interface Employee {
   salaryType: 'commission' | 'salary' | 'both';
   commissionPercent: number;
   monthlySalary: number;
-  permissions: {
-    viewSales: boolean;
-    editProducts: boolean;
-    deleteProducts: boolean;
-    viewDashboard: boolean;
-    manageCategories: boolean;
-    manageEmployees: boolean;
-    settings: boolean;
-  };
+  permissions: Permissions;
 }
 
 const navItems = [
-  { href: '/', label: 'Punto de Venta', icon: ShoppingCart, permission: null },
-  { href: '/inventario', label: 'Inventario', icon: Package, permission: null },
-  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: 'viewDashboard' },
-  { href: '/ventas', label: 'Ventas', icon: Store, permission: 'viewSales' },
-  { href: '/configuracion', label: 'Configuración', icon: Settings, permission: 'settings' },
+  { href: '/',              label: 'Punto de Venta', icon: ShoppingCart,    permission: null },
+  { href: '/inventario',    label: 'Inventario',     icon: Package,         permission: null },
+  { href: '/dashboard',     label: 'Dashboard',      icon: LayoutDashboard, permission: 'viewDashboard' },
+  { href: '/ventas',        label: 'Ventas',         icon: Store,           permission: 'viewSales' },
+  { href: '/configuracion', label: 'Configuración',  icon: Settings,        permission: 'settings' },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const { theme, setTheme } = useTheme();
   const [isOpen, setIsOpen] = useState(false);
   const [user, loading] = useAuthState(auth);
   const [mounted, setMounted] = useState(false);
   const [employeeData, setEmployeeData] = useState<Employee | null>(null);
-  
-  // Login selector states
+
   const [showLoginType, setShowLoginType] = useState(false);
   const [loginType, setLoginType] = useState<'owner' | 'employee' | null>(null);
   const [showStoreSelector, setShowStoreSelector] = useState(false);
@@ -57,145 +59,86 @@ export function Sidebar() {
   useEffect(() => {
     setMounted(true);
     const stored = localStorage.getItem('employeeData');
-    if (stored) {
-      setEmployeeData(JSON.parse(stored));
-    }
+    if (stored) setEmployeeData(JSON.parse(stored));
   }, []);
 
+  useEffect(() => { setIsOpen(false); }, [pathname]);
+
+  // Chequear si la ruta actual está permitida, redirigir si no
   useEffect(() => {
-    setIsOpen(false);
-  }, [pathname]);
+    if (!mounted || loading) return;
+    const stored = localStorage.getItem('employeeData');
+    if (!stored) return; // Es dueño, puede ir a cualquier lado
 
-  const handleGoogleLogin = async () => {
-    try {
-      const result = await signInWithPopup(auth, googleProvider);
-      const email = result.user.email?.toLowerCase() || '';
-      
-      // Buscar empleados con este email
-      const employeesQuery = query(collection(db, 'employees'), where('email', '==', email));
-      const employeesSnapshot = await getDocs(employeesQuery);
-      const employeeAppsData = employeesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Employee));
-      const activeEmployeeApps = employeeAppsData.filter(emp => emp.active);
-      
-      // Buscar si es propietario
-      const settingsQuery = query(collection(db, 'settings'), where('userId', '==', result.user.uid));
-      const settingsSnapshot = await getDocs(settingsQuery);
-      const isOwner = !settingsSnapshot.empty;
-      
-      // Lógica según el tipo de login
-      if (loginType === 'employee') {
-        if (activeEmployeeApps.length === 0) {
-          await signOut(auth);
-          toast.error('No trabajas en ninguna tienda');
-          return;
-        }
-        
-        if (activeEmployeeApps.length === 1) {
-          localStorage.setItem('employeeData', JSON.stringify(activeEmployeeApps[0]));
-          setEmployeeData(activeEmployeeApps[0]);
-          toast.success(`Bienvenido, ${activeEmployeeApps[0].name}!`);
-        } else {
-          setEmployeeApps(activeEmployeeApps);
-          setShowStoreSelector(true);
-        }
-      } else {
-        // Owner
-        if (!isOwner) {
-          await signOut(auth);
-          toast.error('No tienes una tienda registrada');
-          return;
-        }
-        
-        if (activeEmployeeApps.length > 0) {
-          setEmployeeApps(activeEmployeeApps);
-          setShowStoreSelector(true);
-        } else {
-          localStorage.removeItem('employeeData');
-          setEmployeeData(null);
-          toast.success('Bienvenido!');
-        }
-      }
-    } catch (error: any) {
-      if (error.code !== 'auth/cancelled-popup-request') {
-        console.error('Error:', error);
-        toast.error('Error al iniciar sesión');
-      }
+    const emp: Employee = JSON.parse(stored);
+    const currentItem = navItems.find(item => item.href === pathname);
+    if (currentItem?.permission && !emp.permissions[currentItem.permission as keyof Permissions]) {
+      toast.error('No tenés permiso para acceder a esta sección');
+      router.push('/');
     }
+  }, [pathname, mounted, loading]);
+
+  const canAccess = (permission: string | null): boolean => {
+    if (!permission) return true;       // Sin restricción → siempre visible
+    if (!employeeData) return true;     // Es dueño → acceso total
+    return employeeData.permissions[permission as keyof Permissions] === true;
   };
 
-  const handleSignOut = async () => {
-    await signOut(auth);
-    localStorage.removeItem('employeeData');
-    setEmployeeData(null);
-    setShowLoginType(false);
-    setLoginType(null);
-  };
-
-  const canAccess = (permission: string | null) => {
-    if (!permission) return true;
-    if (!employeeData) return true;
-    return employeeData.permissions[permission as keyof typeof employeeData.permissions];
+  const saveEmployeeSession = (emp: Employee) => {
+    const data = {
+      ...emp,
+      ownerUserId: emp.userId,
+    };
+    localStorage.setItem('employeeData', JSON.stringify(data));
+    localStorage.setItem('ownerUserId', emp.userId);
+    setEmployeeData(data);
   };
 
   const startLogin = async (type: 'owner' | 'employee') => {
     setShowLoginType(false);
     setLoginType(type);
-    
     try {
       const result = await signInWithPopup(auth, googleProvider);
       const email = (result.user.email || '').toLowerCase().trim();
-      
+
       if (type === 'employee') {
-        const allEmployeesQuery = query(collection(db, 'employees'));
-        const allEmployeesSnapshot = await getDocs(allEmployeesQuery);
-        
-        const employeeAppsData = allEmployeesSnapshot.docs
-          .map(doc => ({ id: doc.id, ...doc.data() } as Employee))
-          .filter(emp => emp.email && emp.email.toLowerCase() === email);
-        
-        const activeEmployeeApps = employeeAppsData.filter(emp => emp.active);
-        
-        if (activeEmployeeApps.length === 0) {
+        const allEmployeesSnapshot = await getDocs(query(collection(db, 'employees')));
+        const matched = allEmployeesSnapshot.docs
+          .map(d => ({ id: d.id, ...d.data() } as Employee))
+          .filter(emp => emp.email?.toLowerCase() === email && emp.active);
+
+        if (matched.length === 0) {
           await signOut(auth);
-          toast.error('Tu email no está registrado como empleado');
+          toast.error('Tu email no está registrado como empleado activo');
           setLoginType(null);
           return;
         }
-        
-        if (activeEmployeeApps.length === 1) {
-          const employeeWithOwner = {
-            ...activeEmployeeApps[0],
-            ownerUserId: activeEmployeeApps[0].userId
-          };
-          localStorage.setItem('employeeData', JSON.stringify(employeeWithOwner));
-          localStorage.setItem('ownerUserId', activeEmployeeApps[0].userId);
-          setEmployeeData(employeeWithOwner);
-          toast.success(`Bienvenido, ${activeEmployeeApps[0].name}!`);
+
+        if (matched.length === 1) {
+          saveEmployeeSession(matched[0]);
+          toast.success(`Bienvenido, ${matched[0].name}!`);
         } else {
-          setEmployeeApps(activeEmployeeApps);
+          setEmployeeApps(matched);
           setShowStoreSelector(true);
         }
+
       } else {
-        const settingsQuery = query(collection(db, 'settings'), where('userId', '==', result.user.uid));
-        const settingsSnapshot = await getDocs(settingsQuery);
-        const isOwner = !settingsSnapshot.empty;
-        
-        if (!isOwner) {
+        // Owner
+        const settingsSnap = await getDocs(query(collection(db, 'settings'), where('userId', '==', result.user.uid)));
+        if (settingsSnap.empty) {
           await setDoc(doc(db, 'settings', result.user.uid), {
             businessName: 'Mi Tienda',
             createdAt: new Date().toISOString(),
-            userId: result.user.uid
+            userId: result.user.uid,
           });
-          toast.success('Tienda creada correctamente!');
+          toast.success('¡Tienda creada!');
         }
-        
         localStorage.removeItem('employeeData');
         localStorage.setItem('ownerUserId', result.user.uid);
         setEmployeeData(null);
         toast.success('Bienvenido!');
       }
     } catch (error: any) {
-      console.error('Error:', error);
       if (error.code !== 'auth/cancelled-popup-request') {
         toast.error('Error al iniciar sesión');
       }
@@ -203,31 +146,30 @@ export function Sidebar() {
     }
   };
 
-  const selectStore = (isEmployee: boolean, data?: Employee) => {
-    if (isEmployee && data) {
-      const employeeWithOwner = {
-        ...data,
-        ownerUserId: data.userId
-      };
-      localStorage.setItem('employeeData', JSON.stringify(employeeWithOwner));
-      localStorage.setItem('ownerUserId', data.userId);
-      setEmployeeData(employeeWithOwner);
-      toast.success(`Bienvenido, ${data.name}!`);
+  const selectStore = (isEmployee: boolean, emp?: Employee) => {
+    if (isEmployee && emp) {
+      saveEmployeeSession(emp);
+      toast.success(`Bienvenido, ${emp.name}!`);
     } else {
-      const ownerId = user?.uid;
-      if (ownerId) {
-        localStorage.setItem('ownerUserId', ownerId);
-      }
       localStorage.removeItem('employeeData');
+      localStorage.setItem('ownerUserId', user?.uid || '');
       setEmployeeData(null);
       toast.success('Bienvenido!');
     }
     setShowStoreSelector(false);
   };
 
-  if (!mounted) {
-    return null;
-  }
+  const handleSignOut = async () => {
+    await signOut(auth);
+    localStorage.removeItem('employeeData');
+    localStorage.removeItem('ownerUserId');
+    setEmployeeData(null);
+    setShowLoginType(false);
+    setLoginType(null);
+    router.push('/');
+  };
+
+  if (!mounted) return null;
 
   return (
     <>
@@ -243,15 +185,19 @@ export function Sidebar() {
       {isOpen && <div className="lg:hidden fixed inset-0 bg-black/50 z-30" onClick={() => setIsOpen(false)} />}
 
       <aside className={`fixed lg:static inset-y-0 left-0 z-40 w-64 bg-card border-r flex flex-col transition-transform duration-300 ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
+        
+        {/* Header */}
         <div className="p-4 border-b">
           <h1 className="text-2xl font-bold text-primary">POStify</h1>
           {loading ? (
             <p className="text-sm text-muted-foreground">Cargando...</p>
           ) : user ? (
             <div>
-              <p className="text-sm text-muted-foreground truncate">{employeeData ? employeeData.name : user.displayName}</p>
+              <p className="text-sm text-muted-foreground truncate">
+                {employeeData ? employeeData.name : user.displayName}
+              </p>
               {employeeData && (
-                <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded mt-1 inline-block">
+                <span className="text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 px-2 py-0.5 rounded mt-1 inline-block">
                   Empleado
                 </span>
               )}
@@ -260,28 +206,36 @@ export function Sidebar() {
             <p className="text-sm text-muted-foreground">Inicia sesión</p>
           )}
         </div>
-        
-        {/* Dark Mode Button */}
+
+        {/* Dark mode */}
         <div className="p-4 border-b">
           <Button
             variant="outline"
             className="w-full flex items-center gap-2"
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
           >
-            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-            <span>{theme === "dark" ? "Modo Claro" : "Modo Oscuro"}</span>
+            {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            {theme === 'dark' ? 'Modo Claro' : 'Modo Oscuro'}
           </Button>
         </div>
-        
+
+        {/* Nav */}
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href;
-            
-            if (!canAccess(item.permission)) return null;
-            
+            const accessible = canAccess(item.permission);
+
+            if (!accessible) return null;
+
             return (
-              <Link key={item.href} href={item.href} className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 ${isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 ${
+                  isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'
+                }`}
+              >
                 <Icon className="h-5 w-5" />
                 <span className="font-medium">{item.label}</span>
               </Link>
@@ -289,48 +243,44 @@ export function Sidebar() {
           })}
         </nav>
 
+        {/* Login / Logout */}
         <div className="p-4 border-t">
           {loading ? (
             <p className="text-sm text-muted-foreground">Cargando...</p>
           ) : user ? (
             <Button variant="outline" className="w-full" onClick={handleSignOut}>
-              <LogOut className="h-4 w-4 mr-2" />
-              Cerrar Sesión
+              <LogOut className="h-4 w-4 mr-2" /> Cerrar Sesión
             </Button>
           ) : (
             <Button className="w-full" onClick={() => setShowLoginType(true)}>
-              <LogIn className="h-4 w-4 mr-2" />
-              Iniciar Sesión
+              <LogIn className="h-4 w-4 mr-2" /> Iniciar Sesión
             </Button>
           )}
         </div>
       </aside>
 
-      {/* Login Type Selector */}
+      {/* Modal: tipo de login */}
       {showLoginType && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="bg-card rounded-xl p-6 w-full max-w-sm">
             <h2 className="text-lg font-bold mb-2 text-center">¿Cómo vas a entrar?</h2>
-            <p className="text-sm text-muted-foreground mb-4 text-center">Selecciona una opción:</p>
-            
+            <p className="text-sm text-muted-foreground mb-4 text-center">Seleccioná una opción:</p>
             <div className="space-y-3">
-              <Button variant="outline" className="w-full h-14 justify-start text-left" onClick={() => startLogin('owner')}>
+              <Button variant="outline" className="w-full h-14 justify-start" onClick={() => startLogin('owner')}>
                 <Store className="h-5 w-5 mr-3" />
-                <div>
+                <div className="text-left">
                   <div className="font-medium">Soy el dueño</div>
                   <div className="text-xs text-muted-foreground">Tengo mi propia tienda</div>
                 </div>
               </Button>
-              
-              <Button variant="outline" className="w-full h-14 justify-start text-left" onClick={() => startLogin('employee')}>
+              <Button variant="outline" className="w-full h-14 justify-start" onClick={() => startLogin('employee')}>
                 <Users className="h-5 w-5 mr-3" />
-                <div>
+                <div className="text-left">
                   <div className="font-medium">Soy empleado</div>
                   <div className="text-xs text-muted-foreground">Trabajo en una tienda</div>
                 </div>
               </Button>
             </div>
-            
             <Button variant="ghost" className="w-full mt-4" onClick={() => setShowLoginType(false)}>
               Cancelar
             </Button>
@@ -338,23 +288,19 @@ export function Sidebar() {
         </div>
       )}
 
-      {/* Store Selector Modal */}
+      {/* Modal: selector de tienda */}
       {showStoreSelector && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="bg-card rounded-xl p-6 w-full max-w-sm">
-            <h2 className="text-lg font-bold mb-2">¿A qué tienda quieres entrar?</h2>
-            <p className="text-sm text-muted-foreground mb-4">Selecciona una:</p>
-            
+            <h2 className="text-lg font-bold mb-2">¿A qué tienda querés entrar?</h2>
+            <p className="text-sm text-muted-foreground mb-4">Seleccioná una:</p>
             <div className="space-y-2">
               <Button variant="outline" className="w-full justify-start" onClick={() => selectStore(false)}>
-                <Store className="h-4 w-4 mr-2" />
-                Mi tienda (Propia)
+                <Store className="h-4 w-4 mr-2" /> Mi tienda (Propia)
               </Button>
-              
               <div className="border-t my-2" />
-              
-              <p className="text-xs font-medium text-muted-foreground">Tiendas donde trabajas:</p>
-              {employeeApps.map((emp) => (
+              <p className="text-xs font-medium text-muted-foreground">Tiendas donde trabajás:</p>
+              {employeeApps.map(emp => (
                 <Button key={emp.id} variant="outline" className="w-full justify-start" onClick={() => selectStore(true, emp)}>
                   <Users className="h-4 w-4 mr-2" />
                   {emp.name}
