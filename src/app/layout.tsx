@@ -4,6 +4,7 @@ import "./globals.css";
 import { ThemeProvider } from "@/src/components/ThemeProvider";
 import { Sidebar } from "@/src/components/Sidebar";
 import { UserAdsBanner } from "../components/UserAdsBanner";
+import Script from "next/script";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -19,6 +20,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es" suppressHydrationWarning>
+      <head>
+        <Script
+          async
+          src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4465711555804592"
+          crossOrigin="anonymous"
+          strategy="afterInteractive"
+        />
+      </head>
       <body className={inter.className} suppressHydrationWarning>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <div className="flex min-h-screen">

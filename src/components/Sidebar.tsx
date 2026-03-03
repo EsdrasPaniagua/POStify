@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutDashboard, Package, ShoppingCart, Settings, Store, Menu, X, LogIn, LogOut, Users, Sun, Moon } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Settings, Store, Menu, X, LogIn, LogOut, Users, Sun, Moon, Warehouse } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { useAuthState } from 'react-firebase-hooks/auth';
@@ -34,6 +34,12 @@ interface Employee {
   permissions: Permissions;
 }
 
+interface Inventory {
+  id: string;
+  name: string;
+  color: string;
+}
+
 const navItems = [
   { href: '/',              label: 'Ventas',              icon: ShoppingCart,    permission: null },
   { href: '/inventario',    label: 'Inventario',     icon: Package,         permission: null },
@@ -41,6 +47,30 @@ const navItems = [
   { href: '/ventas',        label: 'Historial de Ventas',         icon: Store,           permission: 'viewSales' },
   { href: '/configuracion', label: 'Configuración',  icon: Settings,        permission: 'settings' },
 ];
+
+const pageTitle: Record<string, string> = {
+  '/':              'Ventas',
+  '/inventario':    'Inventario',
+  '/dashboard':     'Estadísticas',
+  '/ventas':        'Historial de Ventas',
+  '/configuracion': 'Configuración',
+};
+
+const getPageTitle = (pathname: string, inventories: Inventory[]): string => {
+  if (pageTitle[pathname]) return pageTitle[pathname];
+  // Rutas dinámicas de inventario: /inventario/[id] y /ventas/[id]
+  const invMatch = pathname.match(/^\/inventario\/(.+)$/);
+  if (invMatch) {
+    const inv = inventories.find(i => i.id === invMatch[1]);
+    return inv ? `Inventario · ${inv.name}` : 'Inventario';
+  }
+  const ventasMatch = pathname.match(/^\/ventas\/(.+)$/);
+  if (ventasMatch) {
+    const inv = inventories.find(i => i.id === ventasMatch[1]);
+    return inv ? `Ventas · ${inv.name}` : 'Ventas';
+  }
+  return 'POStify';
+};
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -56,6 +86,7 @@ export function Sidebar() {
   const [showStoreSelector, setShowStoreSelector] = useState(false);
   const [employeeApps, setEmployeeApps] = useState<Employee[]>([]);
   const [storeName, setStoreName] = useState('');
+  const [inventories, setInventories] = useState<Inventory[]>([]);
 
   useEffect(() => {
     setMounted(true);
@@ -73,6 +104,19 @@ export function Sidebar() {
       } catch {}
     };
     if (mounted) loadStoreName();
+  }, [mounted, user]);
+
+  // Cargar inventarios
+  useEffect(() => {
+    const loadInventories = async () => {
+      const ownerId = localStorage.getItem('ownerUserId');
+      if (!ownerId) return;
+      try {
+        const snap = await getDoc(doc(db, 'settings', ownerId));
+        if (snap.exists()) setInventories(snap.data().inventories || []);
+      } catch {}
+    };
+    if (mounted) loadInventories();
   }, [mounted, user]);
 
   useEffect(() => { setIsOpen(false); }, [pathname]);
@@ -196,10 +240,14 @@ export function Sidebar() {
         >
           {isOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </Button>
-        <span className="font-bold text-primary text-lg">POStify</span>
-        {user && storeName && (
-          <span className="text-xs text-muted-foreground truncate">{storeName}</span>
-        )}
+        <div className="flex-1 min-w-0">
+          <p className="font-bold text-base leading-tight truncate">
+            {getPageTitle(pathname, inventories)}
+          </p>
+          {user && storeName && (
+            <p className="text-[11px] text-muted-foreground truncate">{storeName}</p>
+          )}
+        </div>
       </div>
       {/* Spacer para que el contenido no quede detrás del header mobile */}
       <div className="lg:hidden h-14" />
@@ -251,9 +299,7 @@ export function Sidebar() {
             const Icon = item.icon;
             const isActive = pathname === item.href;
             const accessible = canAccess(item.permission);
-
             if (!accessible) return null;
-
             return (
               <Link
                 key={item.href}
@@ -267,6 +313,50 @@ export function Sidebar() {
               </Link>
             );
           })}
+
+          {/* Inventarios dinámicos */}
+          {inventories.length > 0 && (
+            <>
+              <div className="pt-3 pb-1 px-2">
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Inventarios</p>
+              </div>
+              {inventories.map((inv) => {
+                const isActiveVentas = pathname === `/${inv.id}`;
+                const isActiveInv = pathname === `/inventario/${inv.id}`;
+                return (
+                  <div key={inv.id} className="space-y-0.5">
+                    {/* Label del inventario con color */}
+                    <div className="flex items-center gap-2 px-4 py-1.5">
+                      <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: inv.color }} />
+                      <span className="text-xs font-semibold truncate" style={{ color: inv.color }}>{inv.name}</span>
+                    </div>
+                    {/* Ventas del inventario */}
+                    <Link
+                      href={`/${inv.id}`}
+                      className={`flex items-center gap-3 pl-8 pr-4 py-2 rounded-lg transition-all duration-200 text-sm ${
+                        isActiveVentas ? 'text-primary-foreground' : 'hover:bg-muted text-muted-foreground hover:text-foreground'
+                      }`}
+                      style={isActiveVentas ? { backgroundColor: inv.color } : {}}
+                    >
+                      <ShoppingCart className="h-4 w-4 flex-shrink-0" />
+                      <span>Ventas</span>
+                    </Link>
+                    {/* Inventario del inventario */}
+                    <Link
+                      href={`/inventario/${inv.id}`}
+                      className={`flex items-center gap-3 pl-8 pr-4 py-2 rounded-lg transition-all duration-200 text-sm ${
+                        isActiveInv ? 'text-primary-foreground' : 'hover:bg-muted text-muted-foreground hover:text-foreground'
+                      }`}
+                      style={isActiveInv ? { backgroundColor: inv.color } : {}}
+                    >
+                      <Warehouse className="h-4 w-4 flex-shrink-0" />
+                      <span>Inventario</span>
+                    </Link>
+                  </div>
+                );
+              })}
+            </>
+          )}
         </nav>
 
         {/* Login / Logout */}

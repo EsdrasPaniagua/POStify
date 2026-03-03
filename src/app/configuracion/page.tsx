@@ -11,12 +11,19 @@ import { useAuthState } from 'react-firebase-hooks/auth';
 import { doc, getDoc, setDoc, collection, addDoc, updateDoc, deleteDoc, getDocs, query, where } from 'firebase/firestore';
 import { auth, db } from '@/src/lib/firebase';
 import { toast } from 'sonner';
-import { Store, Tag, Plus, X, Check, Trash2, Users, UserPlus, Edit2, ShieldOff } from 'lucide-react';
+import { Store, Tag, Plus, X, Check, Trash2, Users, UserPlus, Edit2, ShieldOff, Warehouse } from 'lucide-react';
 import { usePermissions } from '@/src/hooks/usePermissions';
 
 interface StoreSettings {
   storeName: string;
   variants: Variant[];
+  inventories: Inventory[];
+}
+
+interface Inventory {
+  id: string;
+  name: string;
+  color: string;
 }
 
 interface Variant {
@@ -93,6 +100,10 @@ export default function ConfiguracionPage() {
   const [employeeActive, setEmployeeActive] = useState(true);
   const [savedStore, setSavedStore] = useState(false);
   const [savedVariants, setSavedVariants] = useState(false);
+  const [inventories, setInventories] = useState<Inventory[]>([]);
+  const [newInventoryName, setNewInventoryName] = useState('');
+  const [newInventoryColor, setNewInventoryColor] = useState('#3b82f6');
+  const [editingInventory, setEditingInventory] = useState<Inventory | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -109,6 +120,7 @@ export default function ConfiguracionPage() {
         const data = docSnap.data() as StoreSettings;
         setStoreName(data.storeName || '');
         setVariants(data.variants || DEFAULT_VARIANTS);
+        setInventories(data.inventories || []);
       }
     } catch (error) { console.error('Error:', error); }
   };
@@ -126,7 +138,7 @@ export default function ConfiguracionPage() {
     if (!ownerId) return;
     setSaving(true);
     try {
-      await setDoc(doc(db, 'settings', ownerId), { storeName, variants, userId: ownerId }, { merge: true });
+      await setDoc(doc(db, 'settings', ownerId), { storeName, variants, inventories, userId: ownerId }, { merge: true });
       toast.success('Guardado');
       setSavedStore(true); setSavedVariants(true);
       setTimeout(() => { setSavedStore(false); setSavedVariants(false); }, 2000);
@@ -230,6 +242,42 @@ export default function ConfiguracionPage() {
     setEmployeePermissions(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
+  const saveInventory = async () => {
+    const ownerId = getOwnerId() || user?.uid;
+    if (!ownerId) return;
+    if (!newInventoryName.trim()) { toast.error('Escribí un nombre'); return; }
+    const newInv: Inventory = {
+      id: editingInventory?.id || Date.now().toString(),
+      name: newInventoryName.trim(),
+      color: newInventoryColor,
+    };
+    const updated = editingInventory
+      ? inventories.map(i => i.id === editingInventory.id ? newInv : i)
+      : [...inventories, newInv];
+    setInventories(updated);
+    await setDoc(doc(db, 'settings', ownerId), { inventories: updated }, { merge: true });
+    toast.success(editingInventory ? 'Inventario actualizado' : 'Inventario creado');
+    setNewInventoryName('');
+    setNewInventoryColor('#3b82f6');
+    setEditingInventory(null);
+  };
+
+  const deleteInventory = async (id: string) => {
+    if (!confirm('¿Eliminar este inventario?')) return;
+    const ownerId = getOwnerId() || user?.uid;
+    if (!ownerId) return;
+    const updated = inventories.filter(i => i.id !== id);
+    setInventories(updated);
+    await setDoc(doc(db, 'settings', ownerId), { inventories: updated }, { merge: true });
+    toast.success('Inventario eliminado');
+  };
+
+  const startEditInventory = (inv: Inventory) => {
+    setEditingInventory(inv);
+    setNewInventoryName(inv.name);
+    setNewInventoryColor(inv.color);
+  };
+
   if (!checked) return <div className="p-6">Cargando...</div>;
 
   if (!isOwner && !can('settings')) {
@@ -326,6 +374,76 @@ export default function ConfiguracionPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Inventarios */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Warehouse className="h-5 w-5" /> Inventarios
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Creá inventarios separados (ej: Depósito, Camioneta). Cada producto puede pertenecer a un inventario.
+          </p>
+
+          {/* Lista de inventarios */}
+          {inventories.length > 0 && (
+            <div className="space-y-2">
+              {inventories.map(inv => (
+                <div key={inv.id} className="flex items-center justify-between p-3 border rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <div className="w-5 h-5 rounded-full border border-border" style={{ backgroundColor: inv.color }} />
+                    <span className="font-medium">{inv.name}</span>
+                  </div>
+                  <div className="flex gap-1">
+                    <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => startEditInventory(inv)}>
+                      <Edit2 className="h-3 w-3" />
+                    </Button>
+                    <Button variant="outline" size="icon" className="h-8 w-8 text-red-500" onClick={() => deleteInventory(inv.id)}>
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Formulario agregar/editar */}
+          <div className="border rounded-lg p-4 space-y-3 bg-muted/30">
+            <p className="text-sm font-medium">{editingInventory ? 'Editar inventario' : 'Nuevo inventario'}</p>
+            <div className="flex gap-2">
+              <Input
+                value={newInventoryName}
+                onChange={(e) => setNewInventoryName(e.target.value)}
+                placeholder="Nombre (ej: Depósito, Camioneta)"
+                onKeyDown={(e) => e.key === 'Enter' && saveInventory()}
+                className="flex-1"
+              />
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-muted-foreground whitespace-nowrap">Color:</label>
+                <input
+                  type="color"
+                  value={newInventoryColor}
+                  onChange={(e) => setNewInventoryColor(e.target.value)}
+                  className="w-10 h-10 rounded border cursor-pointer bg-transparent"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button onClick={saveInventory} className="flex-1">
+                <Plus className="h-4 w-4 mr-1" />
+                {editingInventory ? 'Guardar cambios' : 'Agregar inventario'}
+              </Button>
+              {editingInventory && (
+                <Button variant="outline" onClick={() => { setEditingInventory(null); setNewInventoryName(''); setNewInventoryColor('#3b82f6'); }}>
+                  Cancelar
+                </Button>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Variantes */}
       <Card>

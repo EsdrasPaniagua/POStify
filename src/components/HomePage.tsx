@@ -24,6 +24,13 @@ interface Product {
   userId: string;
   image?: string;
   variants?: Record<string, string>;
+  inventoryId?: string;
+}
+
+interface Inventory {
+  id: string;
+  name: string;
+  color: string;
 }
 
 interface CartItem extends Product {
@@ -164,35 +171,46 @@ const VariantDropdown = ({
   );
 };
 
-const ProductCard = ({ product, onAdd }: { product: Product; onAdd: (product: Product) => void }) => (
-  <Card
-    className="cursor-pointer hover:shadow-lg hover:border-primary/30 transition-all duration-200 active:scale-95 overflow-hidden"
-    onClick={() => onAdd(product)}
-  >
-    <div className="aspect-square bg-gradient-to-br from-muted/50 to-muted flex items-center justify-center relative min-h-[100px] sm:min-h-[120px]">
-      {product.image ? (
-        <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
-      ) : (
-        <Package className="h-10 w-10 sm:h-12 sm:w-12 text-muted-foreground/30" />
-      )}
-      {(product.stock ?? 0) < 10 && (
-        <Badge className="absolute top-1.5 right-1.5 bg-red-500 text-white text-[10px]">{product.stock ?? 0}</Badge>
-      )}
-    </div>
-    <CardContent className="p-2 sm:p-3">
-      <Badge variant="secondary" className="text-[10px] mb-1">{product.category || 'Sin categoría'}</Badge>
-      <h4 className="font-semibold text-xs sm:text-sm truncate leading-tight">{product.name}</h4>
-      {product.variants && Object.keys(product.variants).length > 0 && (
-        <div className="flex flex-wrap gap-1 mt-1">
-          {Object.entries(product.variants).map(([key, value]) => (
-            <span key={key} className="text-[10px] bg-muted px-1.5 py-0.5 rounded">{value}</span>
-          ))}
-        </div>
-      )}
-      <span className="text-base sm:text-xl font-bold text-primary block mt-1">{formatPrice(product.price)}</span>
-    </CardContent>
-  </Card>
-);
+const ProductCard = ({ product, onAdd, inventories }: { product: Product; onAdd: (product: Product) => void; inventories: Inventory[] }) => {
+  const inventory = inventories.find(i => i.id === product.inventoryId);
+  return (
+    <Card
+      className="cursor-pointer hover:shadow-lg hover:border-primary/30 transition-all duration-200 active:scale-95 overflow-hidden"
+      onClick={() => onAdd(product)}
+    >
+      <div className="aspect-square bg-gradient-to-br from-muted/50 to-muted flex items-center justify-center relative min-h-[100px] sm:min-h-[120px]">
+        {product.image ? (
+          <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+        ) : (
+          <Package className="h-10 w-10 sm:h-12 sm:w-12 text-muted-foreground/30" />
+        )}
+        {(product.stock ?? 0) < 10 && (
+          <Badge className="absolute top-1.5 right-1.5 bg-red-500 text-white text-[10px]">{product.stock ?? 0}</Badge>
+        )}
+        {inventory && (
+          <span
+            className="absolute top-1.5 left-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full text-white shadow"
+            style={{ backgroundColor: inventory.color }}
+          >
+            {inventory.name}
+          </span>
+        )}
+      </div>
+      <CardContent className="p-2 sm:p-3">
+        <Badge variant="secondary" className="text-[10px] mb-1">{product.category || 'Sin categoría'}</Badge>
+        <h4 className="font-semibold text-xs sm:text-sm truncate leading-tight">{product.name}</h4>
+        {product.variants && Object.keys(product.variants).length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1">
+            {Object.entries(product.variants).map(([key, value]) => (
+              <span key={key} className="text-[10px] bg-muted px-1.5 py-0.5 rounded">{value}</span>
+            ))}
+          </div>
+        )}
+        <span className="text-base sm:text-xl font-bold text-primary block mt-1">{formatPrice(product.price)}</span>
+      </CardContent>
+    </Card>
+  );
+};
 
 const PAYMENT_LABELS: Record<string, string> = {
   cash: 'Efectivo',
@@ -331,7 +349,7 @@ const Cart = ({
   );
 };
 
-export default function HomePage() {
+export default function HomePage({ defaultInventoryId }: { defaultInventoryId?: string } = {}) {
   const [user, loading] = useAuthState(auth);
   const [mounted, setMounted] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
@@ -344,6 +362,8 @@ export default function HomePage() {
   const [selectedVariants, setSelectedVariants] = useState<{ id: string; value: string }[]>([]);
   const [employeeData, setEmployeeData] = useState<any>(null);
   const [cartOpen, setCartOpen] = useState(false);
+  const [inventories, setInventories] = useState<Inventory[]>([]);
+  const [selectedInventory, setSelectedInventory] = useState<string>(defaultInventoryId || 'all');
 
   const searchRef = useRef<HTMLInputElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -395,7 +415,10 @@ export default function HomePage() {
     try {
       const docRef = doc(db, 'settings', ownerId);
       const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) setVariants(docSnap.data().variants || []);
+      if (docSnap.exists()) {
+        setVariants(docSnap.data().variants || []);
+        setInventories(docSnap.data().inventories || []);
+      }
     } catch (error) { console.error('Error:', error); }
   };
 
@@ -416,7 +439,6 @@ export default function HomePage() {
   const hasActiveSearch = search.trim().length > 0 || selectedVariants.length > 0;
 
   const filteredProducts = hasActiveSearch ? products.filter(p => {
-    // Agrupar por variante: dentro de una misma variante se usa OR, entre variantes AND
     const variantGroups = selectedVariants.reduce((acc, v) => {
       if (!acc[v.id]) acc[v.id] = [];
       acc[v.id].push(v.value);
@@ -429,7 +451,8 @@ export default function HomePage() {
     const matchSearch = !search.trim() ||
       p.name.toLowerCase().includes(search.toLowerCase()) ||
       p.barcode?.includes(search);
-    return matchSearch && matchVariants;
+    const matchInventory = selectedInventory === 'all' || p.inventoryId === selectedInventory;
+    return matchSearch && matchVariants && matchInventory;
   }) : [];
 
   const addToCart = (product: Product) => {
@@ -497,7 +520,9 @@ export default function HomePage() {
           qty: item.qty,
           price: item.price,
           costPrice: item.cost_price || 0,
-          category: item.category
+          category: item.category,
+          inventoryId: item.inventoryId || null,
+          inventoryName: inventories.find(i => i.id === item.inventoryId)?.name || null,
         })),
         createdAt: new Date().toISOString(),
         employeeId: isOwnerSale ? 'owner' : (employeeData?.id || null),
@@ -626,9 +651,39 @@ export default function HomePage() {
             )}
           </div>
 
-          {/* Filtros de variantes */}
-          {hasActiveSearch && variants.filter(v => v.options.length > 0).length > 0 && (
+          {/* Filtros de variantes + inventarios */}
+          {hasActiveSearch && (variants.filter(v => v.options.length > 0).length > 0 || inventories.length > 0) && (
             <div className="flex gap-2 flex-wrap w-full max-w-xl mt-2">
+              {/* Selector de inventario */}
+              {inventories.length > 0 && (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    onClick={() => setSelectedInventory('all')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs border font-medium transition-colors ${
+                      selectedInventory === 'all'
+                        ? 'bg-foreground text-background border-foreground'
+                        : 'bg-background text-foreground border-input hover:bg-muted'
+                    }`}
+                  >
+                    Todos
+                  </button>
+                  {inventories.map(inv => (
+                    <button
+                      key={inv.id}
+                      onClick={() => setSelectedInventory(inv.id)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs border font-medium transition-colors`}
+                      style={selectedInventory === inv.id
+                        ? { backgroundColor: inv.color, color: '#fff', borderColor: inv.color }
+                        : { backgroundColor: 'transparent', color: inv.color, borderColor: inv.color }
+                      }
+                    >
+                      <span className="w-2 h-2 rounded-full bg-current opacity-80" />
+                      {inv.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {/* Filtros de variantes */}
               {variants.filter(v => v.options.length > 0).map((variant) => {
                 const selected = selectedVariants.filter(v => v.id === variant.id);
                 return (
@@ -657,7 +712,7 @@ export default function HomePage() {
           {filteredProducts.length > 0 && (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3">
               {filteredProducts.map((product) => (
-                <ProductCard key={product.id} product={product} onAdd={addToCart} />
+                <ProductCard key={product.id} product={product} onAdd={addToCart} inventories={inventories} />
               ))}
             </div>
           )}
