@@ -30,15 +30,7 @@ export default function RootLayout({
           strategy="afterInteractive"
         />
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-          <div className="flex min-h-screen">
-            <Sidebar />
-            <main className="flex-1 overflow-auto pb-16">
-              {children}
-            </main>
-          </div>
-          <div className="fixed bottom-0 left-0 right-0 z-50 bg-background/95 border-t lg:left-64">
-            <UserAdsBanner />
-          </div>
+          {children}
         </ThemeProvider>
       </body>
     </html>

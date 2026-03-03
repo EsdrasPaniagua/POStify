@@ -41,7 +41,7 @@ interface Inventory {
 }
 
 const navItems = [
-  { href: '/',              label: 'Ventas',              icon: ShoppingCart,    permission: null },
+  { href: '/pos',           label: 'Ventas',              icon: ShoppingCart,    permission: null },
   { href: '/inventario',    label: 'Inventario',     icon: Package,         permission: null },
   { href: '/dashboard',     label: 'Estadísticas',      icon: LayoutDashboard, permission: 'viewDashboard' },
   { href: '/ventas',        label: 'Historial de Ventas',         icon: Store,           permission: 'viewSales' },
@@ -49,7 +49,7 @@ const navItems = [
 ];
 
 const pageTitle: Record<string, string> = {
-  '/':              'Ventas',
+  '/pos':           'Ventas',
   '/inventario':    'Inventario',
   '/dashboard':     'Estadísticas',
   '/ventas':        'Historial de Ventas',
@@ -131,7 +131,7 @@ export function Sidebar() {
     const currentItem = navItems.find(item => item.href === pathname);
     if (currentItem?.permission && !emp.permissions[currentItem.permission as keyof Permissions]) {
       toast.error('No tenés permiso para acceder a esta sección');
-      router.push('/');
+      router.push('/pos');
     }
   }, [pathname, mounted, loading]);
 
@@ -258,7 +258,7 @@ export function Sidebar() {
         
         {/* Header */}
         <div className="p-4 border-b">
-          <h1 className="text-2xl font-bold text-primary">POStify</h1>
+          <h1 className="text-2xl font-bold text-primary cursor-pointer hover:opacity-80 transition-opacity" onClick={() => router.push('/')}>POStify</h1>
           {loading ? (
             <p className="text-sm text-muted-foreground">Cargando...</p>
           ) : user ? (
@@ -321,7 +321,7 @@ export function Sidebar() {
                 <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Inventarios</p>
               </div>
               {inventories.map((inv) => {
-                const isActiveVentas = pathname === `/${inv.id}`;
+                const isActiveVentas = pathname === `/pos` && false; // handled by query
                 const isActiveInv = pathname === `/inventario/${inv.id}`;
                 return (
                   <div key={inv.id} className="space-y-0.5">
@@ -332,7 +332,7 @@ export function Sidebar() {
                     </div>
                     {/* Ventas del inventario */}
                     <Link
-                      href={`/${inv.id}`}
+                      href={`/pos?inventory=${inv.id}`}
                       className={`flex items-center gap-3 pl-8 pr-4 py-2 rounded-lg transition-all duration-200 text-sm ${
                         isActiveVentas ? 'text-primary-foreground' : 'hover:bg-muted text-muted-foreground hover:text-foreground'
                       }`}
