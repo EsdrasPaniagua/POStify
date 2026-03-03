@@ -20,15 +20,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es" suppressHydrationWarning>
-      <head>
+      <body className={inter.className} suppressHydrationWarning>
         <Script
-          async
           src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4465711555804592"
           crossOrigin="anonymous"
           strategy="afterInteractive"
         />
-      </head>
-      <body className={inter.className} suppressHydrationWarning>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <div className="flex min-h-screen">
             <Sidebar />
