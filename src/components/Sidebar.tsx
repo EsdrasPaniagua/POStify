@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { signInWithPopup, signOut } from 'firebase/auth';
 import { auth, googleProvider, db } from '@/src/lib/firebase';
-import { collection, query, where, getDocs, doc, setDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, setDoc, getDoc } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { useTheme } from "next-themes";
 
@@ -35,10 +35,10 @@ interface Employee {
 }
 
 const navItems = [
-  { href: '/',              label: 'Punto de Venta', icon: ShoppingCart,    permission: null },
+  { href: '/',              label: 'Ventas',              icon: ShoppingCart,    permission: null },
   { href: '/inventario',    label: 'Inventario',     icon: Package,         permission: null },
-  { href: '/dashboard',     label: 'Dashboard',      icon: LayoutDashboard, permission: 'viewDashboard' },
-  { href: '/ventas',        label: 'Ventas',         icon: Store,           permission: 'viewSales' },
+  { href: '/dashboard',     label: 'Estadísticas',      icon: LayoutDashboard, permission: 'viewDashboard' },
+  { href: '/ventas',        label: 'Historial de Ventas',         icon: Store,           permission: 'viewSales' },
   { href: '/configuracion', label: 'Configuración',  icon: Settings,        permission: 'settings' },
 ];
 
@@ -55,12 +55,25 @@ export function Sidebar() {
   const [loginType, setLoginType] = useState<'owner' | 'employee' | null>(null);
   const [showStoreSelector, setShowStoreSelector] = useState(false);
   const [employeeApps, setEmployeeApps] = useState<Employee[]>([]);
+  const [storeName, setStoreName] = useState('');
 
   useEffect(() => {
     setMounted(true);
     const stored = localStorage.getItem('employeeData');
     if (stored) setEmployeeData(JSON.parse(stored));
   }, []);
+
+  useEffect(() => {
+    const loadStoreName = async () => {
+      const ownerId = localStorage.getItem('ownerUserId');
+      if (!ownerId) return;
+      try {
+        const snap = await getDoc(doc(db, 'settings', ownerId));
+        if (snap.exists()) setStoreName(snap.data().storeName || '');
+      } catch {}
+    };
+    if (mounted) loadStoreName();
+  }, [mounted, user]);
 
   useEffect(() => { setIsOpen(false); }, [pathname]);
 
@@ -173,18 +186,27 @@ export function Sidebar() {
 
   return (
     <>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="lg:hidden fixed top-4 left-4 z-50 bg-background border shadow-sm"
-        onClick={() => setIsOpen(!isOpen)}
-      >
-        {isOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-      </Button>
+      {/* Mobile header bar */}
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-card border-b flex items-center gap-3 px-4 h-14">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="shrink-0"
+          onClick={() => setIsOpen(!isOpen)}
+        >
+          {isOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+        </Button>
+        <span className="font-bold text-primary text-lg">POStify</span>
+        {user && storeName && (
+          <span className="text-xs text-muted-foreground truncate">{storeName}</span>
+        )}
+      </div>
+      {/* Spacer para que el contenido no quede detrás del header mobile */}
+      <div className="lg:hidden h-14" />
 
       {isOpen && <div className="lg:hidden fixed inset-0 bg-black/50 z-30" onClick={() => setIsOpen(false)} />}
 
-      <aside className={`fixed lg:static inset-y-0 left-0 z-40 w-64 bg-card border-r flex flex-col transition-transform duration-300 ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
+      <aside className={`fixed lg:static top-14 lg:top-0 bottom-0 lg:inset-y-0 left-0 z-40 w-64 bg-card border-r flex flex-col transition-transform duration-300 ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
         
         {/* Header */}
         <div className="p-4 border-b">
@@ -192,14 +214,18 @@ export function Sidebar() {
           {loading ? (
             <p className="text-sm text-muted-foreground">Cargando...</p>
           ) : user ? (
-            <div>
-              <p className="text-sm text-muted-foreground truncate">
-                {employeeData ? employeeData.name : user.displayName}
-              </p>
-              {employeeData && (
-                <span className="text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 px-2 py-0.5 rounded mt-1 inline-block">
-                  Empleado
-                </span>
+            <div className="mt-1 space-y-0.5">
+              {storeName && (
+                <p className="text-xs text-muted-foreground truncate">
+                  <span className="font-semibold text-foreground">Tienda:</span> {storeName}
+                </p>
+              )}
+              {employeeData ? (
+                <p className="text-xs text-muted-foreground truncate">
+                  <span className="font-semibold text-foreground">Empleado:</span> {employeeData.name}
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground truncate">{user.displayName}</p>
               )}
             </div>
           ) : (

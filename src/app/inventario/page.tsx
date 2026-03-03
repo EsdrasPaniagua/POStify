@@ -120,7 +120,9 @@ export default function InventarioPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
-  const [scannerSearchOpen, setScannerSearchOpen] = useState(false); // <-- AGREGAR ESTO
+  const [scannerSearchOpen, setScannerSearchOpen] = useState(false);
+  const [pedidoMode, setPedidoMode] = useState(false);
+  const [pedidoCantidades, setPedidoCantidades] = useState<Record<string, number>>({});
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [newCategory, setNewCategory] = useState('');
   const [selectedVariantOptions, setSelectedVariantOptions] = useState<Record<string, string>>({});
@@ -142,6 +144,7 @@ export default function InventarioPage() {
     loadVariants();
   }
 }, [user]);
+
 
   const loadProducts = async () => {
     try {
@@ -181,22 +184,19 @@ export default function InventarioPage() {
   }
 };
 
+  const [showLowStock, setShowLowStock] = useState(false);
+
   const filteredProducts = products.filter(p => {
-  const matchCat = selectedCategory === 'Todos' || 
-    (selectedCategory === 'BAJO STOCK' && p.stock < 4) ||
-    p.category === selectedCategory;
-  
-  // Filtro por variantes
-  const matchVariants = selectedVariants.length === 0 || 
-    selectedVariants.every(v => p.variants?.[v.id] === v.value);
-  
-  const matchSearch = !search || 
-    p.name.toLowerCase().includes(search.toLowerCase()) || 
-    p.barcode?.includes(search) || 
-    p.category.toLowerCase().includes(search.toLowerCase());
-    
-  return matchCat && matchSearch && matchVariants;
-});
+    const matchCat = selectedCategory === 'Todos' || p.category === selectedCategory;
+    const matchLowStock = !showLowStock || p.stock < 4;
+    const matchVariants = selectedVariants.length === 0 ||
+      selectedVariants.every(v => p.variants?.[v.id] === v.value);
+    const matchSearch = !search ||
+      p.name.toLowerCase().includes(search.toLowerCase()) ||
+      p.barcode?.includes(search) ||
+      p.category.toLowerCase().includes(search.toLowerCase());
+    return matchCat && matchLowStock && matchSearch && matchVariants;
+  });
 
   const totalStockValue = products.reduce((sum, p) => sum + (p.cost_price || 0) * p.stock, 0);
   const totalSaleValue = products.reduce((sum, p) => sum + p.price * p.stock, 0);
@@ -346,6 +346,62 @@ const handleSave = async () => {
     }
   };
 
+  const generarPDF = () => {
+    const items = filteredProducts.filter(p => (pedidoCantidades[p.id] || 0) > 0);
+    if (items.length === 0) { toast.error('Ingresá al menos una cantidad'); return; }
+
+    // Generar HTML para imprimir como PDF
+    const rows = items.map(p => `
+      <tr>
+        <td style="padding:8px;border:1px solid #e2e8f0">${p.name}</td>
+        <td style="padding:8px;border:1px solid #e2e8f0;text-align:center">${Object.values(p.variants || {}).join(' / ') || '-'}</td>
+        <td style="padding:8px;border:1px solid #e2e8f0;text-align:center">${p.stock}</td>
+        <td style="padding:8px;border:1px solid #e2e8f0;text-align:center;font-weight:bold;color:#2563eb">${pedidoCantidades[p.id]}</td>
+      </tr>
+    `).join('');
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Pedido</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 32px; color: #1e293b; }
+    h1 { font-size: 22px; margin-bottom: 4px; }
+    p.fecha { color: #64748b; font-size: 13px; margin-bottom: 24px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    thead tr { background: #f1f5f9; }
+    th { padding: 10px 8px; border: 1px solid #e2e8f0; text-align: left; font-weight: 600; }
+    tr:nth-child(even) { background: #f8fafc; }
+    .total { margin-top: 16px; text-align: right; font-size: 14px; color: #475569; }
+  </style>
+</head>
+<body>
+  <h1>Orden de Pedido</h1>
+  <p class="fecha">Generado: ${new Date().toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })}</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Producto</th>
+        <th style="text-align:center">Variantes</th>
+        <th style="text-align:center">Stock actual</th>
+        <th style="text-align:center">Cantidad a pedir</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <p class="total">Total de productos: <strong>${items.length}</strong> &nbsp;|&nbsp; Unidades a pedir: <strong>${items.reduce((s, p) => s + (pedidoCantidades[p.id] || 0), 0)}</strong></p>
+</body>
+</html>`;
+
+    const win = window.open('', '_blank');
+    if (!win) { toast.error('Permitir popups para generar el PDF'); return; }
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    win.print();
+  };
+
   if (!user) {
     return (
       <div className="p-6 flex flex-col items-center justify-center h-[60vh]">
@@ -452,33 +508,58 @@ groupedProducts.sort((a, b) => {
     </CardContent> 
   </Card>
   
-  {/* Categorías con productos - ocupa 2 espacios */}
-  <Card className="col-span-2"> <CardContent className="pt-4"> <div className="flex items-center gap-2 mb-2"> <Tag className="h-4 w-4 text-muted-foreground" /> <span className="text-xs text-muted-foreground">Productos por Categoría</span> </div> <div className="space-y-1 max-h-24 overflow-y-auto"> {categories .filter(c => c !== 'Todos') .map(cat => { const count = products.filter(p => p.category === cat).length; return { cat, count }; }) .filter(item => item.count > 0) .sort((a, b) => b.count - a.count) .map(({ cat, count }) => ( <div key={cat} className="flex justify-between text-xs"> <span className="truncate">{cat}</span> <span className="font-bold">{count} {count === 1 ? 'producto' : 'productos'}</span> </div> )) } </div> </CardContent> </Card>
-
-  {/* Total de productos - ocupa 2 espacios */}
-  <Card className="col-span-2"> 
-    <CardContent className="pt-4"> 
-      <div className="flex items-center gap-2 mb-2"> 
-        <Tag className="h-4 w-4 text-muted-foreground" /> 
-        <span className="text-xs text-muted-foreground">Stock Por Producto</span> 
-        </div> 
-        <div className="space-y-1 max-h-24 overflow-y-auto"> 
-          {categories .filter(c => c !== 'Todos') 
-          .map(cat => { const stockSum = products.filter(p => p.category === cat)
-          .reduce((sum, p) => sum + p.stock, 0); return { cat, stockSum }; }) 
-          .filter(item => item.stockSum > 0) 
-          .map(({ cat, stockSum }) => (
-            <div key={cat} className="flex justify-between text-xs"> 
-              <span 
-                className="truncate">{cat}
-              </span> 
-              <span 
-                className="font-bold">{stockSum}
-                </span>
+  {/* Productos únicos por Categoría */}
+  <Card className="col-span-2">
+    <CardContent className="pt-4">
+      <div className="flex items-center gap-2 mb-2">
+        <Tag className="h-4 w-4 text-muted-foreground" />
+        <span className="text-xs text-muted-foreground">Productos por Categoría</span>
+      </div>
+      <div className="space-y-1 max-h-24 overflow-y-auto">
+        {categories
+          .filter(c => c !== 'Todos')
+          .map(cat => {
+            const uniqueNames = new Set(products.filter(p => p.category === cat).map(p => p.name));
+            return { cat, count: uniqueNames.size };
+          })
+          .filter(item => item.count > 0)
+          .sort((a, b) => b.count - a.count)
+          .map(({ cat, count }) => (
+            <div key={cat} className="flex justify-between text-xs">
+              <span className="truncate">{cat}</span>
+              <span className="font-bold">{count} {count === 1 ? 'producto' : 'productos'}</span>
             </div>
           ))
-        } 
-      </div> 
+        }
+      </div>
+    </CardContent>
+  </Card>
+
+  {/* Stock por nombre único de producto */}
+  <Card className="col-span-2">
+    <CardContent className="pt-4">
+      <div className="flex items-center gap-2 mb-2">
+        <Tag className="h-4 w-4 text-muted-foreground" />
+        <span className="text-xs text-muted-foreground">Stock por Producto</span>
+      </div>
+      <div className="space-y-1 max-h-24 overflow-y-auto">
+        {Array.from(
+          products.reduce((map, p) => {
+            map.set(p.name, (map.get(p.name) || 0) + p.stock);
+            return map;
+          }, new Map<string, number>())
+        )
+          .map(([name, stock]) => ({ name, stock }))
+          .filter(item => item.stock > 0)
+          .sort((a, b) => b.stock - a.stock)
+          .map(({ name, stock }) => (
+            <div key={name} className="flex justify-between text-xs">
+              <span className="truncate">{name}</span>
+              <span className="font-bold">{stock}</span>
+            </div>
+          ))
+        }
+      </div>
     </CardContent>
   </Card>
   
@@ -496,15 +577,70 @@ groupedProducts.sort((a, b) => {
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9 pr-10"
             />
-            <Button 
-              variant="ghost" 
-              size="icon" 
+            <Button
+              variant="ghost"
+              size="icon"
               className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8"
               onClick={() => setScannerSearchOpen(true)}
             >
               <ScanLine className="h-4 w-4" />
             </Button>
           </div>
+          {/* Bajo Stock + Hacer Pedido */}
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
+            <button
+              onClick={() => {
+                const next = !showLowStock;
+                setShowLowStock(next);
+                if (!next) { setPedidoMode(false); setPedidoCantidades({}); }
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs border font-medium transition-colors ${
+                showLowStock
+                  ? 'bg-red-500 text-white border-red-500'
+                  : 'bg-background text-red-500 border-red-300 hover:bg-red-50 dark:hover:bg-red-950'
+              }`}
+            >
+              <Package className="h-3 w-3" />
+              Bajo Stock
+              {showLowStock && (
+                <span className="ml-1 bg-white/30 text-white rounded-full px-1.5 text-[10px]">
+                  {products.filter(p => p.stock < 4).length}
+                </span>
+              )}
+            </button>
+
+            <button
+              disabled={!showLowStock}
+              onClick={() => { setPedidoMode(prev => !prev); setPedidoCantidades({}); }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs border font-medium transition-colors ${
+                !showLowStock
+                  ? 'opacity-30 cursor-not-allowed border-muted text-muted-foreground'
+                  : pedidoMode
+                    ? 'bg-blue-500 text-white border-blue-500'
+                    : 'bg-background text-blue-600 border-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950'
+              }`}
+            >
+              <Plus className="h-3 w-3" />
+              Hacer Pedido
+            </button>
+
+            {pedidoMode && (
+              <button
+                onClick={generarPDF}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs border font-medium bg-green-500 text-white border-green-500 hover:bg-green-600 transition-colors"
+              >
+                Generar PDF
+              </button>
+            )}
+
+            {showLowStock && (
+              <span className="text-xs text-muted-foreground">
+                {products.filter(p => p.stock < 4).length} productos con stock bajo
+              </span>
+            )}
+          </div>
+
+          {/* Filtros de categoría */}
           <div className="flex gap-2 overflow-x-auto pb-2">
             <Badge
               variant={selectedCategory === 'Todos' ? 'default' : 'outline'}
@@ -512,13 +648,6 @@ groupedProducts.sort((a, b) => {
               onClick={() => setSelectedCategory('Todos')}
             >
               Todos
-            </Badge>
-            <Badge
-              variant={selectedCategory === 'BAJO STOCK' ? 'destructive' : 'outline'}
-              className="cursor-pointer whitespace-nowrap"
-              onClick={() => setSelectedCategory('BAJO STOCK')}
-            >
-              BAJO STOCK
             </Badge>
             {categories.filter(c => c !== 'Todos').map((cat) => (
               <Badge
@@ -576,6 +705,7 @@ groupedProducts.sort((a, b) => {
         <th className="text-left p-2 font-semibold text-xs">Categoría</th>
         <th className="text-left p-2 font-semibold text-xs">Código</th>
         <th className="text-center p-2 font-semibold text-xs">Stock</th>
+        {pedidoMode && <th className="text-center p-2 font-semibold text-xs text-blue-600">Pedir</th>}
         <th className="text-center p-2 font-semibold text-xs">Acciones</th>
       </tr>
     </thead>
@@ -618,6 +748,21 @@ groupedProducts.sort((a, b) => {
           <td className="p-2 text-center">
             <span className={`text-xs font-bold ${p.stock < 4 ? 'text-red-500' : ''}`}>{p.stock}</span>
           </td>
+          {pedidoMode && (
+            <td className="p-2 text-center">
+              <input
+                type="number"
+                min="0"
+                value={pedidoCantidades[p.id] || ''}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value) || 0;
+                  setPedidoCantidades(prev => ({ ...prev, [p.id]: val }));
+                }}
+                placeholder="0"
+                className="w-16 text-center text-xs border rounded-md px-1 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-blue-400"
+              />
+            </td>
+          )}
           <td className="p-2">
             <div className="flex justify-center gap-1">
               <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => openEditDialog(p)}>
