@@ -69,7 +69,7 @@ const ScannerDialog = ({ onScan, onClose }: { onScan: (code: string) => void; on
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold flex items-center gap-2">
             <ScanLine className="h-5 w-5 text-primary" />
-            Escanear Código
+            Escanear Códig
           </h3>
           <Button variant="ghost" size="icon" onClick={onClose}><X className="h-4 w-4" /></Button>
         </div>
