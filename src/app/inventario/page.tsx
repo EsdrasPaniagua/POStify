@@ -6,8 +6,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { db, auth } from '@/src/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { getOwnerId } from '@/src/lib/userId';
-import { Warehouse, Package, ArrowRight } from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/card';
+import { Warehouse, ArrowRight } from 'lucide-react';
 
 interface Inventory {
   id: string;
@@ -47,50 +46,42 @@ export default function InventarioSelectorPage() {
         </p>
       </div>
 
-      {/* General — todos los productos */}
       <div className="space-y-3">
-        <button
-          onClick={() => router.push('/inventario/general')}
-          className="w-full flex items-center gap-4 p-4 rounded-xl border-2 border-border hover:border-primary hover:bg-muted/50 transition-all group"
-        >
-          <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center flex-shrink-0">
-            <Package className="h-6 w-6 text-muted-foreground" />
+        {inventories.length === 0 ? (
+          <div className="text-center py-16 text-muted-foreground">
+            <Warehouse className="h-14 w-14 mx-auto mb-3 opacity-20" />
+            <p className="font-medium text-base">No hay inventarios creados</p>
+            <p className="text-sm mt-1">
+              Creá uno en <span className="font-semibold">Configuración → Inventarios</span>
+            </p>
           </div>
-          <div className="flex-1 text-left">
-            <p className="font-semibold text-base">General</p>
-            <p className="text-xs text-muted-foreground">Todos los productos sin inventario asignado</p>
-          </div>
-          <ArrowRight className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
-        </button>
-
-        {/* Inventarios creados */}
-        {inventories.map((inv) => (
-          <button
-            key={inv.id}
-            onClick={() => router.push(`/inventario/${inv.id}`)}
-            className="w-full flex items-center gap-4 p-4 rounded-xl border-2 hover:bg-muted/30 transition-all group"
-            style={{ borderColor: inv.color + '60' }}
-          >
-            <div
-              className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
-              style={{ backgroundColor: inv.color + '20' }}
+        ) : (
+          inventories.map((inv) => (
+            <button
+              key={inv.id}
+              onClick={() => router.push(`/inventario/${inv.id}`)}
+              className="w-full flex items-center gap-4 p-4 rounded-xl border-2 hover:bg-muted/30 transition-all group"
+              style={{ borderColor: inv.color + '60' }}
             >
-              <Warehouse className="h-6 w-6" style={{ color: inv.color }} />
-            </div>
-            <div className="flex-1 text-left">
-              <p className="font-semibold text-base">{inv.name}</p>
-              <p className="text-xs text-muted-foreground">Ver productos de este inventario</p>
-            </div>
-            <ArrowRight className="h-5 w-5 text-muted-foreground group-hover:translate-x-1 transition-transform" style={{ color: inv.color }} />
-          </button>
-        ))}
+              {/* Ícono con color del inventario */}
+              <div
+                className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
+                style={{ backgroundColor: inv.color + '25' }}
+              >
+                <Warehouse className="h-6 w-6" style={{ color: inv.color }} />
+              </div>
 
-        {inventories.length === 0 && (
-          <div className="text-center py-12 text-muted-foreground">
-            <Warehouse className="h-12 w-12 mx-auto mb-3 opacity-20" />
-            <p className="font-medium">No hay inventarios creados</p>
-            <p className="text-sm mt-1">Creá uno en <span className="font-semibold">Configuración → Inventarios</span></p>
-          </div>
+              <div className="flex-1 text-left">
+                <p className="font-semibold text-base" style={{ color: inv.color }}>{inv.name}</p>
+                <p className="text-xs text-muted-foreground">Ver productos de este inventario</p>
+              </div>
+
+              <ArrowRight
+                className="h-5 w-5 text-muted-foreground group-hover:translate-x-1 transition-transform flex-shrink-0"
+                style={{ color: inv.color }}
+              />
+            </button>
+          ))
         )}
       </div>
     </div>
