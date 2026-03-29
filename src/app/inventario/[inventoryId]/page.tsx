@@ -1,6 +1,7 @@
-"use client";
+// Updated code for src/app/inventario/[inventoryId]/page.tsx
 
 import React from 'react';
+<<<<<<< HEAD
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { BrowserMultiFormatReader } from '@zxing/library';
@@ -72,16 +73,23 @@ const ScannerDialog = ({ onScan, onClose }: { onScan: (code: string) => void; on
             Escanear Código
           </h3>
           <Button variant="ghost" size="icon" onClick={onClose}><X className="h-4 w-4" /></Button>
+=======
+
+const InventoryPage = ({ inventoryId }) => {
+    // Logic for QR/barcode scanner
+    // Logic for image upload
+
+    return (
+        <div>
+            <h1>Inventory Page for {inventoryId}</h1>
+            {/* QR/Barcode scanner component */}
+            {/* Image upload component */}
+>>>>>>> 293ab0c791fd917b154696509ccc9ce3c310da80
         </div>
-        <div className="relative aspect-video bg-black rounded-lg overflow-hidden">
-          <video ref={videoRef} className="w-full h-full object-cover" />
-        </div>
-        <p className="text-xs text-muted-foreground mt-2 text-center">Apuntá la cámara al código de barras</p>
-      </div>
-    </div>
-  );
+    );
 };
 
+<<<<<<< HEAD
 export default function InventarioPage() {
   const params = useParams();
   const router = useRouter();
@@ -740,3 +748,6 @@ export default function InventarioPage() {
     </div>
   );
 }
+=======
+export default InventoryPage;
+>>>>>>> 293ab0c791fd917b154696509ccc9ce3c310da80
