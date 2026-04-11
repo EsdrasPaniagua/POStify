@@ -1,16 +1,48 @@
 "use client";
 
-import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
-import { LayoutDashboard, Package, ShoppingCart, Settings, Store, Menu, X, LogIn, LogOut, Users, Sun, Moon, Warehouse } from 'lucide-react';
-import { useState, useEffect } from 'react';
-import { Button } from '@/components/ui/button';
-import { useAuthState } from 'react-firebase-hooks/auth';
-import { signInWithPopup, signOut } from 'firebase/auth';
-import { auth, googleProvider, db } from '@/src/lib/firebase';
-import { collection, query, where, getDocs, doc, setDoc, getDoc } from 'firebase/firestore';
-import { toast } from 'sonner';
+// src/components/Sidebar.tsx  — multi-store version
+
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import {
+  LayoutDashboard,
+  Package,
+  ShoppingCart,
+  Settings,
+  Store,
+  Menu,
+  X,
+  LogIn,
+  LogOut,
+  Users,
+  Sun,
+  Moon,
+  Warehouse,
+  ChevronDown,
+  Plus,
+} from "lucide-react";
+import { useState, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { useAuthState } from "react-firebase-hooks/auth";
+import { signInWithPopup, signOut } from "firebase/auth";
+import {
+  auth,
+  googleProvider,
+  db,
+} from "@/src/lib/firebase";
+import {
+  collection,
+  query,
+  where,
+  getDocs,
+  doc,
+  setDoc,
+  getDoc,
+} from "firebase/firestore";
+import { toast } from "sonner";
 import { useTheme } from "next-themes";
+import { setActiveStore, clearActiveStore, getOwnerId } from "@/src/lib/userId";
+import { StoreSelector } from "@/src/components/StoreSelector";
 
 interface Permissions {
   viewSales: boolean;
@@ -28,7 +60,7 @@ interface Employee {
   email: string;
   userId: string;
   active: boolean;
-  salaryType: 'commission' | 'salary' | 'both';
+  salaryType: "commission" | "salary" | "both";
   commissionPercent: number;
   monthlySalary: number;
   permissions: Permissions;
@@ -40,36 +72,60 @@ interface Inventory {
   color: string;
 }
 
+interface StoreDoc {
+  id: string;
+  name: string;
+}
+
 const navItems = [
-  { href: '/pos',           label: 'Ventas',              icon: ShoppingCart,    permission: null },
-  { href: '/inventario',    label: 'Inventario',     icon: Package,         permission: null },
-  { href: '/dashboard',     label: 'Estadísticas',      icon: LayoutDashboard, permission: 'viewDashboard' },
-  { href: '/ventas',        label: 'Historial de Ventas',         icon: Store,           permission: 'viewSales' },
-  { href: '/configuracion', label: 'Configuración',  icon: Settings,        permission: 'settings' },
+  {
+    href: "/pos",
+    label: "Ventas",
+    icon: ShoppingCart,
+    permission: null,
+  },
+  {
+    href: "/inventario",
+    label: "Inventario",
+    icon: Package,
+    permission: null,
+  },
+  {
+    href: "/dashboard",
+    label: "Estadísticas",
+    icon: LayoutDashboard,
+    permission: "viewDashboard",
+  },
+  {
+    href: "/ventas",
+    label: "Historial de Ventas",
+    icon: Store,
+    permission: "viewSales",
+  },
+  {
+    href: "/configuracion",
+    label: "Configuración",
+    icon: Settings,
+    permission: "settings",
+  },
 ];
 
 const pageTitle: Record<string, string> = {
-  '/pos':           'Ventas',
-  '/inventario':    'Inventario',
-  '/dashboard':     'Estadísticas',
-  '/ventas':        'Historial de Ventas',
-  '/configuracion': 'Configuración',
+  "/pos": "Ventas",
+  "/inventario": "Inventario",
+  "/dashboard": "Estadísticas",
+  "/ventas": "Historial de Ventas",
+  "/configuracion": "Configuración",
 };
 
 const getPageTitle = (pathname: string, inventories: Inventory[]): string => {
   if (pageTitle[pathname]) return pageTitle[pathname];
-  // Rutas dinámicas de inventario: /inventario/[id] y /ventas/[id]
   const invMatch = pathname.match(/^\/inventario\/(.+)$/);
   if (invMatch) {
-    const inv = inventories.find(i => i.id === invMatch[1]);
-    return inv ? `Inventario · ${inv.name}` : 'Inventario';
+    const inv = inventories.find((i) => i.id === invMatch[1]);
+    return inv ? `Inventario · ${inv.name}` : "Inventario";
   }
-  const ventasMatch = pathname.match(/^\/ventas\/(.+)$/);
-  if (ventasMatch) {
-    const inv = inventories.find(i => i.id === ventasMatch[1]);
-    return inv ? `Ventas · ${inv.name}` : 'Ventas';
-  }
-  return 'POStify';
+  return "POStify";
 };
 
 export function Sidebar() {
@@ -81,156 +137,185 @@ export function Sidebar() {
   const [mounted, setMounted] = useState(false);
   const [employeeData, setEmployeeData] = useState<Employee | null>(null);
 
-  const [showLoginType, setShowLoginType] = useState(false);
-  const [loginType, setLoginType] = useState<'owner' | 'employee' | null>(null);
+  // Multi-store state
   const [showStoreSelector, setShowStoreSelector] = useState(false);
+  const [storeSwitcherOpen, setStoreSwitcherOpen] = useState(false);
+  const [userStores, setUserStores] = useState<StoreDoc[]>([]);
+  const [activeStoreName, setActiveStoreName] = useState("");
+  const [needsStoreSelection, setNeedsStoreSelection] = useState(false);
+
+  // Employee login state
+  const [showLoginType, setShowLoginType] = useState(false);
+  const [showEmployeeStoreSelector, setShowEmployeeStoreSelector] = useState(false);
   const [employeeApps, setEmployeeApps] = useState<Employee[]>([]);
-  const [storeName, setStoreName] = useState('');
+
   const [inventories, setInventories] = useState<Inventory[]>([]);
 
   useEffect(() => {
     setMounted(true);
-    const stored = localStorage.getItem('employeeData');
+    const stored = localStorage.getItem("employeeData");
     if (stored) setEmployeeData(JSON.parse(stored));
   }, []);
 
-  useEffect(() => {
-    const loadStoreName = async () => {
-      const ownerId = localStorage.getItem('ownerUserId');
-      if (!ownerId) return;
-      try {
-        const snap = await getDoc(doc(db, 'settings', ownerId));
-        if (snap.exists()) setStoreName(snap.data().storeName || '');
-      } catch {}
-    };
-    if (mounted) loadStoreName();
-  }, [mounted, user]);
-
-  // Cargar inventarios
-  useEffect(() => {
-    const loadInventories = async () => {
-      const ownerId = localStorage.getItem('ownerUserId');
-      if (!ownerId) return;
-      try {
-        const snap = await getDoc(doc(db, 'settings', ownerId));
-        if (snap.exists()) setInventories(snap.data().inventories || []);
-      } catch {}
-    };
-    if (mounted) loadInventories();
-  }, [mounted, user]);
-
-  useEffect(() => { setIsOpen(false); }, [pathname]);
-
-  // Chequear si la ruta actual está permitida, redirigir si no
+  // When user logs in, check if they have an active store
   useEffect(() => {
     if (!mounted || loading) return;
-    const stored = localStorage.getItem('employeeData');
-    if (!stored) return; // Es dueño, puede ir a cualquier lado
+    if (!user) return;
 
-    const emp: Employee = JSON.parse(stored);
-    const currentItem = navItems.find(item => item.href === pathname);
-    if (currentItem?.permission && !emp.permissions[currentItem.permission as keyof Permissions]) {
-      toast.error('No tenés permiso para acceder a esta sección');
-      router.push('/pos');
+    const empData = localStorage.getItem("employeeData");
+    if (empData) return; // employee – skip store selection
+
+    const activeStoreId = localStorage.getItem("activeStoreId");
+    if (!activeStoreId) {
+      setNeedsStoreSelection(true);
+    } else {
+      loadStoreData(activeStoreId);
+      loadUserStores(user.uid);
     }
-  }, [pathname, mounted, loading]);
+  }, [mounted, loading, user]);
+
+  const loadStoreData = async (storeId: string) => {
+    try {
+      const snap = await getDoc(doc(db, "settings", storeId));
+      if (snap.exists()) {
+        setActiveStoreName(snap.data().storeName || "Mi Tienda");
+        setInventories(snap.data().inventories || []);
+      }
+    } catch {}
+  };
+
+  const loadUserStores = async (userId: string) => {
+    try {
+      const q = query(
+        collection(db, "settings"),
+        where("userId", "==", userId)
+      );
+      const snap = await getDocs(q);
+      setUserStores(
+        snap.docs.map((d) => ({
+          id: d.id,
+          name: d.data().storeName || "Mi Tienda",
+        }))
+      );
+    } catch {}
+  };
+
+  useEffect(() => {
+    setIsOpen(false);
+  }, [pathname]);
 
   const canAccess = (permission: string | null): boolean => {
-    if (!permission) return true;       // Sin restricción → siempre visible
-    if (!employeeData) return true;     // Es dueño → acceso total
-    return employeeData.permissions[permission as keyof Permissions] === true;
+    if (!permission) return true;
+    if (!employeeData) return true;
+    return (
+      employeeData.permissions[permission as keyof Permissions] === true
+    );
   };
 
   const saveEmployeeSession = (emp: Employee) => {
-    const data = {
-      ...emp,
-      ownerUserId: emp.userId,
-    };
-    localStorage.setItem('employeeData', JSON.stringify(data));
-    localStorage.setItem('ownerUserId', emp.userId);
+    const data = { ...emp, ownerUserId: emp.userId };
+    localStorage.setItem("employeeData", JSON.stringify(data));
+    setActiveStore(emp.userId);
     setEmployeeData(data);
   };
 
-  const startLogin = async (type: 'owner' | 'employee') => {
+  const startLogin = async (type: "owner" | "employee") => {
     setShowLoginType(false);
-    setLoginType(type);
     try {
       const result = await signInWithPopup(auth, googleProvider);
-      const email = (result.user.email || '').toLowerCase().trim();
+      const email = (result.user.email || "").toLowerCase().trim();
 
-      if (type === 'employee') {
-        const allEmployeesSnapshot = await getDocs(query(collection(db, 'employees')));
-        const matched = allEmployeesSnapshot.docs
-          .map(d => ({ id: d.id, ...d.data() } as Employee))
-          .filter(emp => emp.email?.toLowerCase() === email && emp.active);
+      if (type === "employee") {
+        const allSnap = await getDocs(collection(db, "employees"));
+        const matched = allSnap.docs
+          .map((d) => ({ id: d.id, ...d.data() } as Employee))
+          .filter((emp) => emp.email?.toLowerCase() === email && emp.active);
 
         if (matched.length === 0) {
           await signOut(auth);
-          toast.error('Tu email no está registrado como empleado activo');
-          setLoginType(null);
+          toast.error("Tu email no está registrado como empleado activo");
           return;
         }
-
         if (matched.length === 1) {
           saveEmployeeSession(matched[0]);
           toast.success(`Bienvenido, ${matched[0].name}!`);
         } else {
           setEmployeeApps(matched);
-          setShowStoreSelector(true);
+          setShowEmployeeStoreSelector(true);
         }
-
       } else {
-        // Owner
-        const settingsSnap = await getDocs(query(collection(db, 'settings'), where('userId', '==', result.user.uid)));
-        if (settingsSnap.empty) {
-          await setDoc(doc(db, 'settings', result.user.uid), {
-            businessName: 'Mi Tienda',
-            createdAt: new Date().toISOString(),
-            userId: result.user.uid,
-          });
-          toast.success('¡Tienda creada!');
+        // Owner: check / show store selector
+        const q = query(
+          collection(db, "settings"),
+          where("userId", "==", result.user.uid)
+        );
+        const snap = await getDocs(q);
+        if (snap.empty) {
+          // First time: will show store selector
+          setNeedsStoreSelection(true);
+        } else {
+          const activeStoreId = localStorage.getItem("activeStoreId");
+          if (!activeStoreId) {
+            setNeedsStoreSelection(true);
+          } else {
+            loadStoreData(activeStoreId);
+            loadUserStores(result.user.uid);
+            toast.success("¡Bienvenido!");
+          }
         }
-        localStorage.removeItem('employeeData');
-        localStorage.setItem('ownerUserId', result.user.uid);
-        setEmployeeData(null);
-        toast.success('Bienvenido!');
       }
     } catch (error: any) {
-      if (error.code !== 'auth/cancelled-popup-request') {
-        toast.error('Error al iniciar sesión');
+      if (error.code !== "auth/cancelled-popup-request") {
+        toast.error("Error al iniciar sesión");
       }
-      setLoginType(null);
     }
   };
 
-  const selectStore = (isEmployee: boolean, emp?: Employee) => {
-    if (isEmployee && emp) {
-      saveEmployeeSession(emp);
-      toast.success(`Bienvenido, ${emp.name}!`);
-    } else {
-      localStorage.removeItem('employeeData');
-      localStorage.setItem('ownerUserId', user?.uid || '');
-      setEmployeeData(null);
-      toast.success('Bienvenido!');
-    }
+  const handleStoreSelected = (storeId: string, storeName: string) => {
+    setActiveStore(storeId);
+    setActiveStoreName(storeName);
+    setNeedsStoreSelection(false);
     setShowStoreSelector(false);
+    if (user) loadUserStores(user.uid);
+    loadStoreData(storeId);
+    toast.success(`Tienda activa: ${storeName}`);
+    router.push("/pos");
+  };
+
+  const switchStore = (store: StoreDoc) => {
+    setActiveStore(store.id);
+    setActiveStoreName(store.name);
+    loadStoreData(store.id);
+    setStoreSwitcherOpen(false);
+    toast.success(`Cambiaste a ${store.name}`);
+    router.push("/pos");
+    router.refresh();
   };
 
   const handleSignOut = async () => {
     await signOut(auth);
-    localStorage.removeItem('employeeData');
-    localStorage.removeItem('ownerUserId');
+    clearActiveStore();
+    localStorage.removeItem("employeeData");
     setEmployeeData(null);
-    setShowLoginType(false);
-    setLoginType(null);
-    router.push('/');
+    setActiveStoreName("");
+    setUserStores([]);
+    setNeedsStoreSelection(false);
+    router.push("/");
   };
 
   if (!mounted) return null;
 
   return (
     <>
-      {/* Mobile header bar */}
+      {/* Full-screen store selector (first login or explicit switch) */}
+      {(needsStoreSelection || showStoreSelector) && user && (
+        <StoreSelector
+          userId={user.uid}
+          onStoreSelected={handleStoreSelected}
+        />
+      )}
+
+      {/* Mobile header */}
       <div className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-card border-b flex items-center gap-3 px-4 h-14">
         <Button
           variant="ghost"
@@ -244,52 +329,110 @@ export function Sidebar() {
           <p className="font-bold text-base leading-tight truncate">
             {getPageTitle(pathname, inventories)}
           </p>
-          {user && storeName && (
-            <p className="text-[11px] text-muted-foreground truncate">{storeName}</p>
+          {activeStoreName && (
+            <p className="text-[11px] text-muted-foreground truncate">
+              {activeStoreName}
+            </p>
           )}
         </div>
       </div>
-      {/* Spacer para que el contenido no quede detrás del header mobile */}
       <div className="lg:hidden h-14" />
 
-      {isOpen && <div className="lg:hidden fixed inset-0 bg-black/50 z-30" onClick={() => setIsOpen(false)} />}
+      {isOpen && (
+        <div
+          className="lg:hidden fixed inset-0 bg-black/50 z-30"
+          onClick={() => setIsOpen(false)}
+        />
+      )}
 
-      <aside className={`fixed lg:static top-14 lg:top-0 bottom-0 lg:inset-y-0 left-0 z-40 w-64 bg-card border-r flex flex-col transition-transform duration-300 ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
-        
-        {/* Header */}
+      <aside
+        className={`fixed lg:static top-14 lg:top-0 bottom-0 lg:inset-y-0 left-0 z-40 w-64 bg-card border-r flex flex-col transition-transform duration-300 ${
+          isOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+        }`}
+      >
+        {/* Logo */}
         <div className="p-4 border-b">
-          <h1 className="text-2xl font-bold text-primary cursor-pointer hover:opacity-80 transition-opacity" onClick={() => router.push('/')}>POStify</h1>
-          {loading ? (
-            <p className="text-sm text-muted-foreground">Cargando...</p>
-          ) : user ? (
-            <div className="mt-1 space-y-0.5">
-              {storeName && (
-                <p className="text-xs text-muted-foreground truncate">
-                  <span className="font-semibold text-foreground">Tienda:</span> {storeName}
-                </p>
-              )}
-              {employeeData ? (
-                <p className="text-xs text-muted-foreground truncate">
-                  <span className="font-semibold text-foreground">Empleado:</span> {employeeData.name}
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground truncate">{user.displayName}</p>
+          <h1
+            className="text-2xl font-bold text-primary cursor-pointer hover:opacity-80 transition-opacity"
+            onClick={() => router.push("/")}
+          >
+            POStify
+          </h1>
+
+          {/* Active store switcher */}
+          {user && !employeeData && activeStoreName && (
+            <div className="mt-2 relative">
+              <button
+                onClick={() => setStoreSwitcherOpen((o) => !o)}
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted transition-colors text-left"
+              >
+                <Store className="h-3.5 w-3.5 text-primary flex-shrink-0" />
+                <span className="text-xs font-medium truncate flex-1">
+                  {activeStoreName}
+                </span>
+                <ChevronDown
+                  className={`h-3 w-3 text-muted-foreground transition-transform ${
+                    storeSwitcherOpen ? "rotate-180" : ""
+                  }`}
+                />
+              </button>
+
+              {storeSwitcherOpen && (
+                <div className="absolute left-0 right-0 top-full mt-1 bg-card border rounded-xl shadow-xl z-50 overflow-hidden">
+                  {userStores.map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={() => switchStore(s)}
+                      className="w-full flex items-center gap-2 px-3 py-2.5 text-xs hover:bg-muted transition-colors text-left"
+                    >
+                      <Store className="h-3.5 w-3.5 text-primary flex-shrink-0" />
+                      <span className="truncate flex-1">{s.name}</span>
+                      {s.id === getOwnerId() && (
+                        <span className="text-[10px] text-primary font-semibold">
+                          activa
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                  <div className="border-t">
+                    <button
+                      onClick={() => {
+                        setStoreSwitcherOpen(false);
+                        setShowStoreSelector(true);
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2.5 text-xs hover:bg-muted transition-colors text-muted-foreground"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Nueva tienda
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">Inicia sesión</p>
+          )}
+
+          {/* Employee info */}
+          {employeeData && (
+            <p className="text-xs text-muted-foreground mt-1 truncate">
+              <span className="font-semibold text-foreground">Empleado:</span>{" "}
+              {employeeData.name}
+            </p>
           )}
         </div>
 
-        {/* Dark mode */}
+        {/* Dark mode toggle */}
         <div className="p-4 border-b">
           <Button
             variant="outline"
             className="w-full flex items-center gap-2"
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
           >
-            {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-            {theme === 'dark' ? 'Modo Claro' : 'Modo Oscuro'}
+            {theme === "dark" ? (
+              <Sun className="h-4 w-4" />
+            ) : (
+              <Moon className="h-4 w-4" />
+            )}
+            {theme === "dark" ? "Modo Claro" : "Modo Oscuro"}
           </Button>
         </div>
 
@@ -298,14 +441,15 @@ export function Sidebar() {
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href;
-            const accessible = canAccess(item.permission);
-            if (!accessible) return null;
+            if (!canAccess(item.permission)) return null;
             return (
               <Link
                 key={item.href}
                 href={item.href}
                 className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 ${
-                  isActive ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'
+                  isActive
+                    ? "bg-primary text-primary-foreground"
+                    : "hover:bg-muted"
                 }`}
               >
                 <Icon className="h-5 w-5" />
@@ -314,40 +458,49 @@ export function Sidebar() {
             );
           })}
 
-          {/* Inventarios dinámicos */}
+          {/* Inventories */}
           {inventories.length > 0 && (
             <>
               <div className="pt-3 pb-1 px-2">
-                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Inventarios</p>
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                  Inventarios
+                </p>
               </div>
               {inventories.map((inv) => {
-                const isActiveVentas = pathname === `/pos` && false; // handled by query
                 const isActiveInv = pathname === `/inventario/${inv.id}`;
                 return (
                   <div key={inv.id} className="space-y-0.5">
-                    {/* Label del inventario con color */}
                     <div className="flex items-center gap-2 px-4 py-1.5">
-                      <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: inv.color }} />
-                      <span className="text-xs font-semibold truncate" style={{ color: inv.color }}>{inv.name}</span>
+                      <div
+                        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: inv.color }}
+                      />
+                      <span
+                        className="text-xs font-semibold truncate"
+                        style={{ color: inv.color }}
+                      >
+                        {inv.name}
+                      </span>
                     </div>
-                    {/* Ventas del inventario */}
                     <Link
                       href={`/pos?inventory=${inv.id}`}
-                      className={`flex items-center gap-3 pl-8 pr-4 py-2 rounded-lg transition-all duration-200 text-sm ${
-                        isActiveVentas ? 'text-primary-foreground' : 'hover:bg-muted text-muted-foreground hover:text-foreground'
-                      }`}
-                      style={isActiveVentas ? { backgroundColor: inv.color } : {}}
+                      className="flex items-center gap-3 pl-8 pr-4 py-2 rounded-lg transition-all duration-200 text-sm hover:bg-muted text-muted-foreground hover:text-foreground"
                     >
                       <ShoppingCart className="h-4 w-4 flex-shrink-0" />
                       <span>Ventas</span>
                     </Link>
-                    {/* Inventario del inventario */}
                     <Link
                       href={`/inventario/${inv.id}`}
                       className={`flex items-center gap-3 pl-8 pr-4 py-2 rounded-lg transition-all duration-200 text-sm ${
-                        isActiveInv ? 'text-primary-foreground' : 'hover:bg-muted text-muted-foreground hover:text-foreground'
+                        isActiveInv
+                          ? "text-primary-foreground"
+                          : "hover:bg-muted text-muted-foreground hover:text-foreground"
                       }`}
-                      style={isActiveInv ? { backgroundColor: inv.color } : {}}
+                      style={
+                        isActiveInv
+                          ? { backgroundColor: inv.color }
+                          : {}
+                      }
                     >
                       <Warehouse className="h-4 w-4 flex-shrink-0" />
                       <span>Inventario</span>
@@ -364,7 +517,11 @@ export function Sidebar() {
           {loading ? (
             <p className="text-sm text-muted-foreground">Cargando...</p>
           ) : user ? (
-            <Button variant="outline" className="w-full" onClick={handleSignOut}>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={handleSignOut}
+            >
               <LogOut className="h-4 w-4 mr-2" /> Cerrar Sesión
             </Button>
           ) : (
@@ -375,54 +532,76 @@ export function Sidebar() {
         </div>
       </aside>
 
-      {/* Modal: tipo de login */}
+      {/* Modal: login type */}
       {showLoginType && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="bg-card rounded-xl p-6 w-full max-w-sm">
-            <h2 className="text-lg font-bold mb-2 text-center">¿Cómo vas a entrar?</h2>
-            <p className="text-sm text-muted-foreground mb-4 text-center">Seleccioná una opción:</p>
+            <h2 className="text-lg font-bold mb-2 text-center">
+              ¿Cómo vas a entrar?
+            </h2>
+            <p className="text-sm text-muted-foreground mb-4 text-center">
+              Seleccioná una opción:
+            </p>
             <div className="space-y-3">
-              <Button variant="outline" className="w-full h-14 justify-start" onClick={() => startLogin('owner')}>
+              <Button
+                variant="outline"
+                className="w-full h-14 justify-start"
+                onClick={() => startLogin("owner")}
+              >
                 <Store className="h-5 w-5 mr-3" />
                 <div className="text-left">
                   <div className="font-medium">Soy el dueño</div>
-                  <div className="text-xs text-muted-foreground">Tengo mi propia tienda</div>
+                  <div className="text-xs text-muted-foreground">
+                    Tengo mi propia tienda
+                  </div>
                 </div>
               </Button>
-              <Button variant="outline" className="w-full h-14 justify-start" onClick={() => startLogin('employee')}>
+              <Button
+                variant="outline"
+                className="w-full h-14 justify-start"
+                onClick={() => startLogin("employee")}
+              >
                 <Users className="h-5 w-5 mr-3" />
                 <div className="text-left">
                   <div className="font-medium">Soy empleado</div>
-                  <div className="text-xs text-muted-foreground">Trabajo en una tienda</div>
+                  <div className="text-xs text-muted-foreground">
+                    Trabajo en una tienda
+                  </div>
                 </div>
               </Button>
             </div>
-            <Button variant="ghost" className="w-full mt-4" onClick={() => setShowLoginType(false)}>
+            <Button
+              variant="ghost"
+              className="w-full mt-4"
+              onClick={() => setShowLoginType(false)}
+            >
               Cancelar
             </Button>
           </div>
         </div>
       )}
 
-      {/* Modal: selector de tienda */}
-      {showStoreSelector && (
+      {/* Modal: employee store selector */}
+      {showEmployeeStoreSelector && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="bg-card rounded-xl p-6 w-full max-w-sm">
-            <h2 className="text-lg font-bold mb-2">¿A qué tienda querés entrar?</h2>
-            <p className="text-sm text-muted-foreground mb-4">Seleccioná una:</p>
-            <div className="space-y-2">
-              <Button variant="outline" className="w-full justify-start" onClick={() => selectStore(false)}>
-                <Store className="h-4 w-4 mr-2" /> Mi tienda (Propia)
-              </Button>
-              <div className="border-t my-2" />
-              <p className="text-xs font-medium text-muted-foreground">Tiendas donde trabajás:</p>
-              {employeeApps.map(emp => (
-                <Button key={emp.id} variant="outline" className="w-full justify-start" onClick={() => selectStore(true, emp)}>
+            <h2 className="text-lg font-bold mb-2">
+              ¿A qué tienda querés entrar?
+            </h2>
+            <div className="space-y-2 mt-4">
+              {employeeApps.map((emp) => (
+                <Button
+                  key={emp.id}
+                  variant="outline"
+                  className="w-full justify-start"
+                  onClick={() => {
+                    saveEmployeeSession(emp);
+                    toast.success(`Bienvenido, ${emp.name}!`);
+                    setShowEmployeeStoreSelector(false);
+                  }}
+                >
                   <Users className="h-4 w-4 mr-2" />
                   {emp.name}
-                  <span className="ml-auto text-xs text-muted-foreground">
-                    {emp.salaryType === 'commission' ? `${emp.commissionPercent}%` : `$${emp.monthlySalary}`}
-                  </span>
                 </Button>
               ))}
             </div>
